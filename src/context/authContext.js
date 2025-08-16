@@ -16,7 +16,6 @@ export const AuthProvider = ({ children }) => {
   const [token, setToken] = useState(localStorage.getItem('ron_token'));  
   const [loading, setLoading] = useState(true);  
   
-  // Verificar si hay un token válido al cargar la aplicación  
   useEffect(() => {  
     const checkAuth = async () => {  
       if (token) {  
@@ -52,7 +51,6 @@ export const AuthProvider = ({ children }) => {
   const register = async (username, password, email) => {  
     try {  
       await ronAPI.register(username, password, email);  
-      // Después del registro exitoso, hacer login automáticamente  
       return await login(username, password);  
     } catch (error) {  
       return { success: false, error: error.message };  

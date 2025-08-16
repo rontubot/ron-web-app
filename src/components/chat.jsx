@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';  
-import { useAuth } from '../context/authContext';  
+import { useAuth } from '../context/authcontext';  
 import { ronAPI } from '../services/api';  
-import './Chat.css';  
+import './chat.css';  
   
 const Chat = () => {  
   const [messages, setMessages] = useState([]);  
@@ -12,7 +12,6 @@ const Chat = () => {
     
   const { user, token, logout } = useAuth();  
   
-  // Auto-scroll al final de los mensajes  
   const scrollToBottom = () => {  
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });  
   };  
@@ -21,14 +20,12 @@ const Chat = () => {
     scrollToBottom();  
   }, [messages]);  
   
-  // Cargar historial de conversaciones al montar el componente  
   useEffect(() => {  
     const loadConversations = async () => {  
       try {  
         const response = await ronAPI.getUserConversations(token);  
         const conversations = response.conversations || [];  
           
-        // Convertir el formato del backend al formato del chat  
         const formattedMessages = conversations.map((conv, index) => [  
           {  
             id: `user-${index}`,  
@@ -88,7 +85,6 @@ const Chat = () => {
   
       setMessages(prev => [...prev, ronMessage]);  
   
-      // Si Ron indica shutdown, mostrar mensaje de despedida  
       if (response.shutdown) {  
         setTimeout(() => {  
           logout();  

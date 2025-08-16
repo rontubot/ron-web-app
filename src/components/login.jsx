@@ -1,6 +1,6 @@
 import React, { useState } from 'react';  
-import { useAuth } from '../context/authContext';  
-import './Login.css';  
+import { useAuth } from '../context/authcontext';  
+import './login.css';  
   
 const Login = () => {  
   const [isLogin, setIsLogin] = useState(true);  
@@ -19,7 +19,7 @@ const Login = () => {
       ...formData,  
       [e.target.name]: e.target.value  
     });  
-    setError(''); // Limpiar error al escribir  
+    setError('');  
   };  
   
   const handleSubmit = async (e) => {  

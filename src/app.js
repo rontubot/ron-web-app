@@ -1,9 +1,9 @@
 import React from 'react';  
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';  
-import { AuthProvider, useAuth } from './context/authContext';  
+import { AuthProvider, useAuth } from './context/authcontext';  
 import Login from './components/login';  
 import Chat from './components/chat';  
-import './App.css';  
+import './app.css';  
   
 // Componente para rutas protegidas  
 const ProtectedRoute = ({ children }) => {  

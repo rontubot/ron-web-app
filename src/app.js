@@ -1,8 +1,8 @@
 import React from 'react';  
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';  
-import { AuthProvider, useAuth } from './context/AuthContext';  
-import Login from './components/Login';  
-import Chat from './components/Chat';  
+import { AuthProvider, useAuth } from './context/authContext';  
+import Login from './components/login';  
+import Chat from './components/chat';  
 import './App.css';  
   
 // Componente para rutas protegidas  

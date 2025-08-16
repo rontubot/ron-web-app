@@ -1,0 +1,17 @@
+# Ignorar archivos de Node.js/React  
+node_modules/  
+package.json  
+package-lock.json  
+src/  
+public/  
+build/  
+.env.local  
+.env.development.local  
+.env.test.local  
+.env.production.local  
+  
+# Mantener solo archivos Python  
+!api.py  
+!requirements.txt  
+!core/  
+!.env  

@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://tu-servidor.railway.app';  
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://ron-web-app-production.up.railway.app/';  
   
 class RonAPI {  
   constructor() {  

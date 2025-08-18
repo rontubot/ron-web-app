@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://tu-app-railway.up.railway.app';
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://ron-web-app-railwaydockerfilepath.up.railway.app';
   
 class RonAPI {  
   constructor() {  

@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://ron-production.up.railway.app';  
+const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000';  
   
 class RonAPI {  
   constructor() {  
@@ -18,11 +18,11 @@ class RonAPI {
     try {  
       const response = await fetch(url, config);  
       const data = await response.json();  
-        
+          
       if (!response.ok) {  
         throw new Error(data.detail || 'Error en la petición');  
       }  
-        
+          
       return data;  
     } catch (error) {  
       console.error('API Error:', error);  

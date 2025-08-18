@@ -15,7 +15,7 @@ app.use(express.json());
 app.use(express.static(path.join(__dirname, 'build')));  
   
 // JWT Secret  
-const JWT_SECRET = process.env.JWT_SECRET || 'tu-jwt-secret-super-seguro';  
+const JWT_SECRET = process.env.JWT_SECRET || '1925e2a0e6c8d8c196af044c77cc52dc';  
   
 // Base de datos simulada en memoria (en producción usar una DB real)  
 const users = new Map();  

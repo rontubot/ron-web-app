@@ -1,7 +1,6 @@
 const express = require('express');  
 const path = require('path');  
 const jwt = require('jsonwebtoken');  
-const bcrypt = require('bcryptjs');  
 const cors = require('cors');  
 const axios = require('axios');  
 const fs = require('fs');  
@@ -35,18 +34,14 @@ app.use((req, res, next) => {
   next();  
 });  
   
-// JWT Secret  
+// JWT Secret (para verificar tokens del servidor principal)  
 const JWT_SECRET = process.env.JWT_SECRET || '1925e2a0e6c8d8c196af044c77cc52dc';  
-  
-// Base de datos simulada en memoria  
-const users = new Map();  
-const conversations = new Map();  
   
 // URL del servidor de Ron existente - CORREGIDA  
 const RON_API_URL = process.env.RON_API_URL || 'https://ron-production.up.railway.app';  
   
-// Middleware de autenticación  
-const authenticateToken = (req, res, next) => {  
+// Middleware de autenticación (verifica tokens del servidor principal)  
+const authenticateToken = async (req, res, next) => {  
   const authHeader = req.headers['authorization'];  
   const token = authHeader && authHeader.split(' ')[1];  
   
@@ -55,123 +50,138 @@ const authenticateToken = (req, res, next) => {
     return res.status(401).json({ detail: 'Token de acceso requerido' });  
   }  
   
-  jwt.verify(token, JWT_SECRET, (err, user) => {  
-    if (err) {  
-      console.log(`🔒 Token inválido en ${req.path}:`, err.message);  
-      return res.status(403).json({ detail: 'Token inválido' });  
-    }  
-    console.log(`✅ Token válido para usuario: ${user.username}`);  
-    req.user = user;  
-    next();  
-  });  
-};  
-  
-// Endpoints de autenticación  
-app.post('/auth/register', async (req, res) => {  
-  console.log(`🔐 Intento de registro para usuario: ${req.body.username}`);  
   try {  
-    const { username, password, email } = req.body;  
-  
-    if (!username || !password || !email) {  
-      console.log(`❌ Campos faltantes en registro`);  
-      return res.status(400).json({ detail: 'Todos los campos son requeridos' });  
-    }  
-  
-    if (users.has(username)) {  
-      console.log(`❌ Usuario ${username} ya existe`);  
-      return res.status(400).json({ detail: 'El usuario ya existe' });  
-    }  
-  
-    const hashedPassword = await bcrypt.hash(password, 10);  
-    users.set(username, {  
-      username,  
-      password: hashedPassword,  
-      email,  
-      createdAt: new Date().toISOString()  
+    // Verificar token con el servidor principal  
+    const response = await axios.get(`${RON_API_URL}/user/profile`, {  
+      headers: {  
+        'Authorization': `Bearer ${token}`  
+      },  
+      timeout: 5000  
     });  
   
-    conversations.set(username, []);  
-    console.log(`✅ Usuario ${username} registrado exitosamente`);  
-  
-    res.status(201).json({ message: 'Usuario creado exitosamente' });  
+    if (response.status === 200) {  
+      console.log(`✅ Token válido para usuario: ${response.data.username}`);  
+      req.user = response.data;  
+      next();  
+    } else {  
+      console.log(`🔒 Token inválido en ${req.path}`);  
+      return res.status(403).json({ detail: 'Token inválido' });  
+    }  
   } catch (error) {  
-    console.error('❌ Error en registro:', error);  
-    res.status(500).json({ detail: 'Error interno del servidor' });  
+    console.log(`🔒 Error verificando token en ${req.path}:`, error.message);  
+    return res.status(403).json({ detail: 'Token inválido' });  
+  }  
+};  
+  
+// Endpoints de autenticación - PROXY al servidor principal  
+app.post('/auth/register', async (req, res) => {  
+  console.log(`🔐 Proxy registro para usuario: ${req.body.username}`);  
+  try {  
+    const response = await axios.post(`${RON_API_URL}/auth/register`, req.body, {  
+      headers: {  
+        'Content-Type': 'application/json'  
+      },  
+      timeout: 10000  
+    });  
+  
+    console.log(`✅ Usuario ${req.body.username} registrado exitosamente en servidor principal`);  
+    res.status(response.status).json(response.data);  
+  } catch (error) {  
+    console.error('❌ Error en proxy registro:', error.message);  
+    if (error.response) {  
+      res.status(error.response.status).json(error.response.data);  
+    } else {  
+      res.status(500).json({ detail: 'Error interno del servidor' });  
+    }  
   }  
 });  
   
 app.post('/auth/login', async (req, res) => {  
-  console.log(`🔐 Intento de login para usuario: ${req.body.username}`);  
+  console.log(`🔐 Proxy login para usuario: ${req.body.username}`);  
   try {  
-    const { username, password } = req.body;  
-  
-    if (!username || !password) {  
-      console.log(`❌ Credenciales faltantes`);  
-      return res.status(400).json({ detail: 'Usuario y contraseña requeridos' });  
-    }  
-  
-    const user = users.get(username);  
-    if (!user) {  
-      console.log(`❌ Usuario ${username} no encontrado`);  
-      return res.status(401).json({ detail: 'Credenciales inválidas' });  
-    }  
-  
-    const validPassword = await bcrypt.compare(password, user.password);  
-    if (!validPassword) {  
-      console.log(`❌ Contraseña incorrecta para ${username}`);  
-      return res.status(401).json({ detail: 'Credenciales inválidas' });  
-    }  
-  
-    const token = jwt.sign(  
-      { username: user.username, email: user.email },  
-      JWT_SECRET,  
-      { expiresIn: '24h' }  
-    );  
-  
-    console.log(`✅ Login exitoso para ${username}`);  
-  
-    res.json({  
-      access_token: token,  
-      username: user.username,  
-      token_type: 'bearer'  
+    const response = await axios.post(`${RON_API_URL}/auth/login`, req.body, {  
+      headers: {  
+        'Content-Type': 'application/json'  
+      },  
+      timeout: 10000  
     });  
+  
+    console.log(`✅ Login exitoso para ${req.body.username} en servidor principal`);  
+    res.json(response.data);  
   } catch (error) {  
-    console.error('❌ Error en login:', error);  
-    res.status(500).json({ detail: 'Error interno del servidor' });  
+    console.error('❌ Error en proxy login:', error.message);  
+    if (error.response) {  
+      res.status(error.response.status).json(error.response.data);  
+    } else {  
+      res.status(500).json({ detail: 'Error interno del servidor' });  
+    }  
   }  
 });  
   
-app.post('/auth/logout', authenticateToken, (req, res) => {  
-  console.log(`🔐 Logout para usuario: ${req.user.username}`);  
-  res.json({ message: 'Sesión cerrada exitosamente' });  
-});  
+app.post('/auth/logout', authenticateToken, async (req, res) => {  
+  console.log(`🔐 Proxy logout para usuario: ${req.user.username}`);  
+  try {  
+    const response = await axios.post(`${RON_API_URL}/auth/logout`, {}, {  
+      headers: {  
+        'Authorization': req.headers['authorization'],  
+        'Content-Type': 'application/json'  
+      },  
+      timeout: 5000  
+    });  
   
-// Endpoints de usuario  
-app.get('/user/profile', authenticateToken, (req, res) => {  
-  console.log(`👤 Perfil solicitado para: ${req.user.username}`);  
-  const user = users.get(req.user.username);  
-  if (!user) {  
-    return res.status(404).json({ detail: 'Usuario no encontrado' });  
+    res.json(response.data);  
+  } catch (error) {  
+    console.error('❌ Error en proxy logout:', error.message);  
+    res.json({ message: 'Sesión cerrada exitosamente' });  
   }  
-  
-  res.json({  
-    username: user.username,  
-    email: user.email,  
-    createdAt: user.createdAt  
-  });  
 });  
   
-app.get('/user/conversations', authenticateToken, (req, res) => {  
-  console.log(`💬 Conversaciones solicitadas para: ${req.user.username}`);  
-  const userConversations = conversations.get(req.user.username) || [];  
-  res.json({  
-    conversations: userConversations  
-  });  
+// Endpoints de usuario - PROXY al servidor principal  
+app.get('/user/profile', authenticateToken, async (req, res) => {  
+  console.log(`👤 Proxy perfil para: ${req.user.username}`);  
+  try {  
+    const response = await axios.get(`${RON_API_URL}/user/profile`, {  
+      headers: {  
+        'Authorization': req.headers['authorization']  
+      },  
+      timeout: 5000  
+    });  
+  
+    res.json(response.data);  
+  } catch (error) {  
+    console.error('❌ Error en proxy perfil:', error.message);  
+    if (error.response) {  
+      res.status(error.response.status).json(error.response.data);  
+    } else {  
+      res.status(500).json({ detail: 'Error interno del servidor' });  
+    }  
+  }  
 });  
   
-// Endpoint principal de chat  
+app.get('/user/conversations', authenticateToken, async (req, res) => {  
+  console.log(`💬 Proxy conversaciones para: ${req.user.username}`);  
+  try {  
+    const response = await axios.get(`${RON_API_URL}/user/conversations`, {  
+      headers: {  
+        'Authorization': req.headers['authorization']  
+      },  
+      timeout: 5000  
+    });  
+  
+    res.json(response.data);  
+  } catch (error) {  
+    console.error('❌ Error en proxy conversaciones:', error.message);  
+    if (error.response) {  
+      res.status(error.response.status).json(error.response.data);  
+    } else {  
+      res.status(500).json({ detail: 'Error interno del servidor' });  
+    }  
+  }  
+});  
+  
+// Endpoint principal de chat - PROXY al servidor principal con autenticación  
 app.post('/ron', authenticateToken, async (req, res) => {  
-  console.log(`🤖 Chat solicitado por: ${req.user.username} - Texto: "${req.body.text}"`);  
+  console.log(`🤖 Proxy chat para: ${req.user.username} - Texto: "${req.body.text}"`);  
   try {  
     const { text } = req.body;  
   
@@ -179,32 +189,23 @@ app.post('/ron', authenticateToken, async (req, res) => {
       return res.status(400).json({ detail: 'Texto requerido' });  
     }  
   
-    console.log(`🔗 Enviando petición a Ron API: ${RON_API_URL}/ron`);  
+    console.log(`🔗 Enviando petición autenticada a Ron API: ${RON_API_URL}/`);  
       
-    // Llamar al servidor de Ron existente  
-    const response = await axios.post(`${RON_API_URL}/ron`, {  
+    // Llamar al servidor de Ron existente con autenticación  
+    const response = await axios.post(`${RON_API_URL}/`, {  
       text: text  
     }, {  
       headers: {  
+        'Authorization': req.headers['authorization'],  
         'Content-Type': 'application/json'  
       },  
       timeout: 30000  
     });  
   
-    const ronResponse = response.data.ron;  
-    console.log(`✅ Respuesta de Ron recibida: "${ronResponse}"`);  
-  
-    // Guardar la conversación  
-    const userConversations = conversations.get(req.user.username) || [];  
-    userConversations.push({  
-      user: text,  
-      ron: ronResponse,  
-      timestamp: new Date().toISOString()  
-    });  
-    conversations.set(req.user.username, userConversations);  
+    console.log(`✅ Respuesta de Ron recibida: "${response.data.ron}"`);  
   
     res.json({  
-      ron: ronResponse,  
+      ron: response.data.ron,  
       shutdown: response.data.shutdown || false  
     });  
   
@@ -218,7 +219,7 @@ app.post('/ron', authenticateToken, async (req, res) => {
     if (error.response) {  
       console.error('❌ Error response de Ron:', error.response.status, error.response.data);  
       return res.status(error.response.status).json({   
-        detail: error.response.data.error || 'Error del servidor de Ron'   
+        detail: error.response.data.detail || 'Error del servidor de Ron'   
       });  
     }  
   
@@ -226,7 +227,7 @@ app.post('/ron', authenticateToken, async (req, res) => {
   }  
 });  
   
-// Endpoints de utilidad  
+// Endpoints de utilidad - PROXY al servidor principal  
 app.get('/health', async (req, res) => {  
   console.log(`🏥 Health check solicitado`);  
   try {  
@@ -250,25 +251,21 @@ app.get('/health', async (req, res) => {
 });  
   
 app.get('/memory-status', authenticateToken, async (req, res) => {  
-  console.log(`🧠 Memory status solicitado por: ${req.user.username}`);  
+  console.log(`🧠 Proxy memory status para: ${req.user.username}`);  
   try {  
-    const ronMemory = await axios.get(`${RON_API_URL}/memory-status`, { timeout: 5000 });  
-    const userConversations = conversations.get(req.user.username) || [];  
-      
-    res.json({  
-      status: 'ok',  
-      user_conversations: userConversations.length,  
-      ron_memory: ronMemory.data,  
-      timestamp: new Date().toISOString()  
+    const response = await axios.get(`${RON_API_URL}/memory-status`, {  
+      headers: {  
+        'Authorization': req.headers['authorization']  
+      },  
+      timeout: 5000  
     });  
+      
+    res.json(response.data);  
   } catch (error) {  
     console.error(`❌ Error obteniendo memory status:`, error.message);  
-    const userConversations = conversations.get(req.user.username) || [];  
-      
     res.json({  
       status: 'partial',  
-      user_conversations: userConversations.length,  
-      ron_memory_error: 'No se puede obtener estado de memoria de Ron',  
+      error: 'No se puede obtener estado de memoria de Ron',  
       timestamp: new Date().toISOString()  
     });  
   }  
@@ -308,9 +305,8 @@ app.listen(PORT, () => {
   if (fs.existsSync(buildPath)) {  
     console.log(`✅ Carpeta build existe`);  
     const files = fs.readdirSync(buildPath);  
-    console.log(`📋 Archivos en build:`, files.slice(0, 10)); // Mostrar solo los primeros 10  
+    console.log(`📋 Archivos en build:`, files.slice(0, 10));  
       
-    // Verificar index.html específicamente  
     const indexPath = path.join(buildPath, 'index.html');  
     if (fs.existsSync(indexPath)) {  
       console.log(`✅ index.html confirmado en build/`);  

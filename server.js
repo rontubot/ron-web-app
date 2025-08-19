@@ -192,7 +192,7 @@ app.post('/ron', authenticateToken, async (req, res) => {
     console.log(`🔗 Enviando petición autenticada a Ron API: ${RON_API_URL}/`);  
       
     // Llamar al servidor de Ron existente con autenticación  
-    const response = await axios.post(`${RON_API_URL}/`, {  
+    const response = await axios.post(`${RON_API_URL}/ron`, {  
       text: text  
     }, {  
       headers: {  

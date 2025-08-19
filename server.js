@@ -18,6 +18,22 @@ app.use((req, res, next) => {
   next();  
 });
   
+// Middleware adicional para manejar diferentes Content-Types  
+app.use(express.text());  
+app.use(express.urlencoded({ extended: true }));  
+  
+// Middleware para forzar parsing de JSON  
+app.use((req, res, next) => {  
+  if (req.headers['content-type'] === 'text/plain;charset=UTF-8' && req.body) {  
+    try {  
+      req.body = JSON.parse(req.body);  
+    } catch (e) {  
+      console.log('❌ Error parsing JSON from text/plain:', e.message);  
+    }  
+  }  
+  next();  
+});
+
 // Servir archivos estáticos de React  
 app.use(express.static(path.join(__dirname, 'build')));  
   

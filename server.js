@@ -22,7 +22,7 @@ const users = new Map();
 const conversations = new Map();  
   
 // URL del servidor de Ron existente  
-const RON_API_URL = process.env.RON_API_URL || 'https://ron-app.up.railway.app';  
+const RON_API_URL = process.env.RON_API_URL || 'https://ron-production.up.railway.app';  
   
 // Middleware de autenticación  
 const authenticateToken = (req, res, next) => {  

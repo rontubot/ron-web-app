@@ -1,0 +1,10 @@
+# dependencias y builds
+node_modules/
+build/
+dist/
+out/
+
+# varios
+*.log
+.env
+.DS_Store

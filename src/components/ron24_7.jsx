@@ -21,17 +21,15 @@ const Ron24_7 = () => {
     }]);  
   };  
   
-  // Auto-scroll a los logs más recientes  
-  useEffect(() => {  
-    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });  
-  }, [logs]);  
+// Auto-scroll a los logs más recientes  
+useEffect(() => {    
+  logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });    
+}, [logs]);    
   
-  // Verificar estado inicial de Ron 24/7  
-  useEffect(() => {  
-  checkRon247Status();  
-}, [checkRon247Status]);
-
-  []);  
+// Verificar estado inicial de Ron 24/7    
+useEffect(() => {    
+  checkRon247Status();    
+}, []); 
   
   const checkRon247Status = async () => {  
     try {  

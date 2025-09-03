@@ -28,8 +28,10 @@ const Ron24_7 = () => {
   
   // Verificar estado inicial de Ron 24/7  
   useEffect(() => {  
-    checkRon247Status();  
-  }, []);  
+  checkRon247Status();  
+}, [checkRon247Status]);
+
+  []);  
   
   const checkRon247Status = async () => {  
     try {  

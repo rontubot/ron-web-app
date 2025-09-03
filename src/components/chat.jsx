@@ -10,7 +10,7 @@ const Chat = () => {
   const [error, setError] = useState('');    
   const messagesEndRef = useRef(null);    
       
-  const { user, token, logout } = useAuth();    
+  const { token, logout } = useAuth();    
     
   const scrollToBottom = () => {    
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });    

@@ -400,3 +400,71 @@
   0% { transform: rotate(0deg); }  
   100% { transform: rotate(360deg); }  
 }
+
+
+/* Mejoras para responsive en ron247-header */  
+.ron247-header {  
+  background: white;  
+  padding: 16px 20px;  
+  border-radius: 12px;  
+  box-shadow: 0 2px 8px rgba(0,0,0,0.1);  
+  display: flex;  
+  justify-content: space-between;  
+  align-items: center;  
+  flex-wrap: wrap;  
+  gap: 15px;  
+  min-height: 80px; /* Asegurar altura mínima */  
+}  
+  
+.ron247-controls {  
+  display: flex;  
+  gap: 12px;  
+  flex-shrink: 0; /* Evitar que se comprima */  
+  min-width: fit-content;  
+}  
+  
+.toggle-button {  
+  padding: 12px 20px;  
+  border: none;  
+  border-radius: 8px;  
+  font-size: 1rem;  
+  font-weight: 600;  
+  cursor: pointer;  
+  transition: all 0.3s ease;  
+  min-width: 120px;  
+  white-space: nowrap; /* Evitar que el texto se rompa */  
+}  
+  
+/* Responsive específico para móviles */  
+@media (max-width: 768px) {  
+  .ron247-header {  
+    flex-direction: column;  
+    align-items: stretch;  
+    gap: 15px;  
+    padding: 16px;  
+  }  
+    
+  .ron247-controls {  
+    order: 3; /* Mover controles al final */  
+    justify-content: center;  
+    width: 100%;  
+  }  
+    
+  .toggle-button {  
+    flex: 1;  
+    max-width: 200px;  
+    margin: 0 auto;  
+  }  
+}  
+  
+@media (max-width: 480px) {  
+  .ron247-header {  
+    padding: 12px;  
+  }  
+    
+  .toggle-button {  
+    padding: 10px 16px;  
+    font-size: 0.9rem;  
+    min-width: 100px;  
+  }  
+}

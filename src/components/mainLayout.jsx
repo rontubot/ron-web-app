@@ -1,7 +1,7 @@
 import React from 'react';  
 import { useLocation, useNavigate } from 'react-router-dom';  
 import { useAuth } from '../context/authcontext';  
-import './MainLayout.css';  
+import './mainLayout.css';  
   
 const MainLayout = ({ children }) => {  
   const location = useLocation();  

@@ -56,9 +56,9 @@ function AppContent() {
             path="/chat"     
             element={    
               <ProtectedRoute>    
-                <MainLayout>  
+                <mainLayout>  
                   <Chat />  
-                </MainLayout>  
+                </mainLayout>  
               </ProtectedRoute>    
             }     
           />  
@@ -66,9 +66,9 @@ function AppContent() {
             path="/ron247"     
             element={    
               <ProtectedRoute>    
-                <MainLayout>  
-                  <Ron24_7 />  
-                </MainLayout>  
+                <mainLayout>  
+                  <ron24_7 />  
+                </mainLayout>  
               </ProtectedRoute>    
             }     
           />    

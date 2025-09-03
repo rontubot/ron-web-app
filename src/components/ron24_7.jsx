@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';  
+import React, { useState, useEffect, useRef, useCallback } from 'react';  
 import { useAuth } from '../context/authcontext';  
 import './ron24_7.css';  
   
@@ -21,17 +21,13 @@ const Ron24_7 = () => {
     }]);  
   };  
   
-// Auto-scroll a los logs más recientes  
-useEffect(() => {    
-  logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });    
-}, [logs]);    
+  // Auto-scroll a los logs más recientes  
+  useEffect(() => {  
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });  
+  }, [logs]);  
   
-// Verificar estado inicial de Ron 24/7    
-useEffect(() => {    
-  checkRon247Status();    
-}, []); 
-  
-  const checkRon247Status = async () => {  
+  // Función para verificar estado con useCallback para evitar dependencias circulares  
+  const checkRon247Status = useCallback(async () => {  
     try {  
       const status = await window.electronAPI.getRon247Status();  
       setIsActive(status.isRunning);  
@@ -43,7 +39,12 @@ useEffect(() => {
       setIsConnected(false);  
       addLog('Error al conectar con Ron 24/7', 'error');  
     }  
-  };  
+  }, []);  
+  
+  // Verificar estado inicial de Ron 24/7  
+  useEffect(() => {  
+    checkRon247Status();  
+  }, [checkRon247Status]);  
   
   const toggleRon247 = async () => {  
     try {  

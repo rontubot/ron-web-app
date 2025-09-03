@@ -3,8 +3,8 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { AuthProvider, useAuth } from './context/authcontext';    
 import Login from './components/login';    
 import Chat from './components/chat';    
-import Ron24_7 from './components/ron24_7';  
-import MainLayout from './components/mainLayout';  
+import ron24_7 from './components/ron24_7';  
+import mainLayout from './components/mainLayout';  
 import './app.css';    
     
 // Componente para rutas protegidas    

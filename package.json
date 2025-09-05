@@ -30,7 +30,7 @@
     ]  
   },  
   "dependencies": {  
-    "electron": "^latest",  
-    "electron-is-dev": "^latest"  
-  }  
+    "electron": "latest",  
+    "electron-is-dev": "latest" 
+  }  	
 }

@@ -468,3 +468,27 @@
     min-width: 100px;  
   }  
 }
+
+.listening-toggle-button {  
+  padding: 12px 20px;  
+  border: none;  
+  border-radius: 8px;  
+  font-size: 1rem;  
+  font-weight: 600;  
+  cursor: pointer;  
+  transition: all 0.3s ease;  
+  min-width: 140px;  
+  background: #007bff;  
+  color: white;  
+}  
+  
+.listening-toggle-button:hover {  
+  background: #0056b3;  
+  transform: translateY(-1px);  
+}  
+  
+.listening-toggle-button:disabled {  
+  background: #6c757d;  
+  cursor: not-allowed;  
+  transform: none;  
+}

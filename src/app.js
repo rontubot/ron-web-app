@@ -1,5 +1,5 @@
 import React from 'react';      
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';      
+import { HashRouter as Router, Routes, Route, Navigate } from 'react-router-dom';      
 import { AuthProvider, useAuth } from './context/authcontext';      
 import Login from './components/login';      
 import Chat from './components/chat';      

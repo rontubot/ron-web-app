@@ -4,6 +4,7 @@ const isDev = require('electron-is-dev');
 const { spawn } = require('child_process');
 const net = require('net');
 const fs = require('fs').promises;
+const fs2 = require('fs');
 
 // (opcional) variables de entorno para el proceso principal
 try { require('dotenv').config(); } catch (_) {}
@@ -15,7 +16,7 @@ const fetchImpl = global.fetch || (async (...args) => {
 });
 
 // (opcional) URL backend si luego usas el proxy IPC ron:req
-const API_URL = process.env.RON_API_URL || 'https://TU-BACKEND-RON.example.com';
+const API_URL = process.env.RON_API_URL || 'https://';
 
 let mainWindow;
 let ronPythonProcess = null;
@@ -24,10 +25,28 @@ let ron247Status = 'inactive'; // 'inactive' | 'starting' | 'listening' | 'conve
 // --------- Util: ruta robusta para preload en dev y build ----------
 function getPreloadPath() {
   if (!app.isPackaged) {
+    // Dev: como lo tienes ahora
     return path.join(__dirname, '../preload.js');
   }
-  // En empaquetado, busca en resources (fuera del asar si se incluye como file)
-  return path.join(process.resourcesPath, 'preload.js');
+
+  // Build: probar ubicaciones más comunes
+  const candidates = [
+    // 1) donde intentabas
+    path.join(process.resourcesPath, 'preload.js'),
+    // 2) dentro de app.asar (si lo empacaste ahí)
+    path.join(process.resourcesPath, 'app.asar', 'preload.js'),
+    // 3) junto al ejecutable (tu caso actual: win-unpacked\preload.js)
+    path.join(path.dirname(process.execPath), 'preload.js'),
+  ];
+
+  for (const p of candidates) {
+    try { if (fs2.existsSync(p)) return p; } catch (_) {}
+  }
+
+  // Último recurso: log y devuelve la opción “junto al exe”
+  const fallback = path.join(path.dirname(process.execPath), 'preload.js');
+  console.warn('[Electron] preload no encontrado en ubicaciones estándar. Usando fallback:', fallback);
+  return fallback;
 }
 
 // --------- Descarga de scripts Python a una carpeta writable ----------
@@ -114,29 +133,40 @@ function createWindow() {
 }
 
 // --------- Socket helper para comandos al proceso Python ----------
+
+
 async function sendCommandToRon(command) {
-  return new Promise((resolve, reject) => {
+  const tryConnect = (host) => new Promise((resolve, reject) => {
     const client = new (require('net').Socket)();
-    client.connect(9999, 'localhost', () => client.write(command));
+
+    client.once('error', (err) => {
+      client.destroy();
+      reject(err);
+    });
+
+    client.setTimeout(4000, () => {
+      client.destroy();
+      reject(new Error(`Socket timeout to ${host}:9999`));
+    });
+
+    client.connect(9999, host, () => {
+      client.write(command);
+    });
 
     client.on('data', (data) => {
       const response = data.toString().trim();
       client.destroy();
       resolve(response);
     });
-
-    client.on('error', (err) => {
-      client.destroy();
-      reject(err);
-    });
-
-    client.setTimeout(3000, () => {
-      client.destroy();
-      reject(new Error('Socket timeout - Ron process may not be responding'));
-    });
   });
-}
 
+  // 1º IPv4; 2º fallback a localhost (por si el server cambiara)
+  try {
+    return await tryConnect('127.0.0.1');
+  } catch (_e) {
+    return await tryConnect('localhost');
+  }
+}
 // ==================== IPC: Ron 24/7 ====================
 
 ipcMain.handle('start-ron-247', async (_event, userData) => {
@@ -149,20 +179,34 @@ ipcMain.handle('start-ron-247', async (_event, userData) => {
     const { baseDir } = await downloadPythonFiles();
     const pythonScriptPath = path.join(baseDir, 'ron_launcher.py');
 
-    ronPythonProcess = spawn('python', [
+    // Lanzar Python con UTF-8 forzado (Windows safe)
+    const args = [
+      '-X', 'utf8',
       pythonScriptPath,
       '--username', userData?.username || '',
       '--control-port', '9999',
-    ], { stdio: ['pipe', 'pipe', 'pipe'] });
+    ];
+    console.log('[RON] launching python:', 'python', args);
 
+    ronPythonProcess = spawn('python', args, {
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: {
+        ...process.env,
+        PYTHONUTF8: '1',
+        PYTHONIOENCODING: 'utf-8',
+      },
+    });
+
+    // Errores al lanzar
     ronPythonProcess.on('error', (err) => {
-      console.error('Error spawn python:', err);
+      console.error('[RON] error al lanzar Python:', err);
       ron247Status = 'inactive';
       mainWindow?.webContents.send('ron-247-status-changed', 'inactive');
     });
 
     ron247Status = 'starting';
 
+    // Salida estándar
     ronPythonProcess.stdout.on('data', (data) => {
       const output = data.toString();
       console.log('Ron 24/7 output:', output);
@@ -174,10 +218,12 @@ ipcMain.handle('start-ron-247', async (_event, userData) => {
       mainWindow?.webContents.send('ron-247-output', output);
     });
 
+    // Errores de Python (stderr)
     ronPythonProcess.stderr.on('data', (data) => {
       console.error('Ron 24/7 error:', data.toString());
     });
 
+    // Fin del proceso
     ronPythonProcess.on('close', (code) => {
       console.log(`Ron 24/7 process exited with code ${code}`);
       ronPythonProcess = null;
@@ -185,7 +231,7 @@ ipcMain.handle('start-ron-247', async (_event, userData) => {
       mainWindow?.webContents.send('ron-247-status-changed', 'inactive');
     });
 
-    // pequeño delay para que arranque
+    // pequeño delay para dar tiempo a iniciar
     await new Promise((r) => setTimeout(r, 3000));
 
     return { success: true, message: 'Ron 24/7 iniciado correctamente con archivos actualizados' };
@@ -194,6 +240,7 @@ ipcMain.handle('start-ron-247', async (_event, userData) => {
     return { success: false, message: error.message };
   }
 });
+
 
 ipcMain.handle('stop-ron-247', async () => {
   try {

@@ -181,6 +181,7 @@ ipcMain.handle('start-ron-247', async (_event, userData) => {
 
     // Lanzar Python con UTF-8 forzado (Windows safe)
     const args = [
+      '-u',             // <— salida sin buffer
       '-X', 'utf8',
       pythonScriptPath,
       '--username', userData?.username || '',
@@ -194,6 +195,7 @@ ipcMain.handle('start-ron-247', async (_event, userData) => {
         ...process.env,
         PYTHONUTF8: '1',
         PYTHONIOENCODING: 'utf-8',
+        PYTHONUNBUFFERED: '1',  // <— refuerzo por si acaso
       },
     });
 

@@ -7,4 +7,4 @@ out/
 # varios
 *.log
 .env
-.DS_Store
+.DS_Store*.zip

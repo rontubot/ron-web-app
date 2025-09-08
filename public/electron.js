@@ -61,6 +61,7 @@ async function downloadPythonFiles() {
     { url: `${baseUrl}/core/assistant.py`, path: path.join(baseDir, 'core', 'assistant.py') },
     { url: `${baseUrl}/core/memory.py`, path: path.join(baseDir, 'core', 'memory.py') },
     { url: `${baseUrl}/core/commands.py`, path: path.join(baseDir, 'core', 'commands.py') },
+    { url: `${baseUrl}/config.py`, path: path.join(baseDir, 'config.py') },
   ];
 
   try {

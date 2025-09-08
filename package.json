@@ -46,7 +46,9 @@
       "build/**/*",
       "public/electron.js",
       "preload.js",
+      "python-scripts/**/*",
       "node_modules/**/*"
+
     ],
     "extraFiles": [
       "public/electron.js",

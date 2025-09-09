@@ -492,3 +492,77 @@
   cursor: not-allowed;  
   transform: none;  
 }
+
+
+
+/* Agregar a ron24_7.css */  
+.manual-recording-button {  
+  padding: 12px 20px;  
+  border: none;  
+  border-radius: 8px;  
+  font-size: 1rem;  
+  font-weight: 600;  
+  cursor: pointer;  
+  transition: all 0.3s ease;  
+  min-width: 140px;  
+  position: relative;  
+}  
+  
+.manual-recording-button.idle {  
+  background: #007bff;  
+  color: white;  
+}  
+  
+.manual-recording-button.idle:hover {  
+  background: #0056b3;  
+  transform: translateY(-1px);  
+}  
+  
+.manual-recording-button.recording {  
+  background: #dc3545;  
+  color: white;  
+  animation: pulse 1.5s infinite;  
+}  
+  
+.manual-recording-button.processing {  
+  background: #ffc107;  
+  color: #212529;  
+}  
+  
+.manual-recording-button:disabled {  
+  background: #6c757d;  
+  cursor: not-allowed;  
+  transform: none;  
+  animation: none;  
+}  
+  
+@keyframes pulse {  
+  0% { opacity: 1; }  
+  50% { opacity: 0.7; }  
+  100% { opacity: 1; }  
+}
+
+
+.manual-recording-button .button-content {  
+  display: flex;  
+  flex-direction: column;  
+  align-items: center;  
+  gap: 8px;  
+}  
+  
+.spectrum-canvas {  
+  border-radius: 4px;  
+  background: rgba(0, 0, 0, 0.1);  
+  opacity: 0.9;  
+}  
+  
+.manual-recording-button.recording .spectrum-canvas {  
+  animation: spectrumGlow 2s infinite alternate;  
+}  
+  
+@keyframes spectrumGlow {  
+  0% { box-shadow: 0 0 5px rgba(255, 255, 255, 0.3); }  
+  100% { box-shadow: 0 0 15px rgba(255, 255, 255, 0.6); }  
+}
+
+

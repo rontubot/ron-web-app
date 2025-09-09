@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';    
 import { useAuth } from '../context/authcontext';    
-import './ron24_7.css';    
+import './ron24_7.css';  
+import React, { useState, useEffect, useRef, useCallback } from 'react';  
     
 const Ron24_7 = () => {    
   const { user } = useAuth();    
@@ -8,8 +9,162 @@ const Ron24_7 = () => {
   const [status, setStatus] = useState('inactive'); // 'inactive', 'listening', 'conversing'    
   const [logs, setLogs] = useState([]);    
   const [isConnected, setIsConnected] = useState(false);    
-  const logsEndRef = useRef(null);    
+  const logsEndRef = useRef(null);
+  const [isRecording, setIsRecording] = useState(false);  
+  const [recordingStatus, setRecordingStatus] = useState('idle'); // 'idle', 'recording', 'processing'
+  const [audioContext, setAudioContext] = useState(null);  
+  const [analyser, setAnalyser] = useState(null);  
+  const [mediaStream, setMediaStream] = useState(null);  
+  const [animationId, setAnimationId] = useState(null);  
+  const canvasRef = useRef(null);     
     
+ 
+  // Función para configurar el análisis de audio  
+  const setupAudioAnalysis = async () => {  
+    try {  
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });  
+      const context = new (window.AudioContext || window.webkitAudioContext)();  
+      const source = context.createMediaStreamSource(stream);  
+      const analyserNode = context.createAnalyser();  
+        
+      analyserNode.fftSize = 256;  
+      source.connect(analyserNode);  
+        
+      setAudioContext(context);  
+      setAnalyser(analyserNode);  
+      setMediaStream(stream);  
+        
+      return { context, analyserNode, stream };  
+    } catch (error) {  
+      console.error('Error accessing microphone:', error);  
+      addLog('Error al acceder al micrófono para visualización', 'error');  
+      return null;  
+    }  
+  };
+
+  // Función para dibujar el espectro de audio  
+  const drawSpectrum = (analyserNode, canvas) => {  
+    const ctx = canvas.getContext('2d');  
+    const bufferLength = analyserNode.frequencyBinCount;  
+    const dataArray = new Uint8Array(bufferLength);  
+      
+    const draw = () => {  
+      if (!analyserNode || recordingStatus !== 'recording') return;  
+        
+      analyserNode.getByteFrequencyData(dataArray);  
+        
+      ctx.clearRect(0, 0, canvas.width, canvas.height);  
+        
+      const barWidth = canvas.width / bufferLength;  
+      let x = 0;  
+        
+      for (let i = 0; i < bufferLength; i++) {  
+        const barHeight = (dataArray[i] / 255) * canvas.height;  
+          
+        // Gradiente de color basado en la frecuencia  
+        const hue = (i / bufferLength) * 360;  
+        ctx.fillStyle = `hsl(${hue}, 70%, 50%)`;  
+          
+        ctx.fillRect(x, canvas.height - barHeight, barWidth, barHeight);  
+        x += barWidth;  
+      }  
+        
+      const id = requestAnimationFrame(draw);  
+      setAnimationId(id);  
+    };  
+      
+    draw();  
+  };
+
+
+
+  // Función modificada para iniciar grabación manual  
+  const startManualRecording = async () => {  
+    try {  
+      setRecordingStatus('recording');  
+      setIsRecording(true);  
+        
+      // Configurar análisis de audio  
+      const audioSetup = await setupAudioAnalysis();  
+      if (audioSetup && canvasRef.current) {  
+        drawSpectrum(audioSetup.analyserNode, canvasRef.current);  
+      }  
+        
+      const result = await window.electronAPI.startManualRecording();  
+      if (result.success) {  
+        addLog('Grabación manual iniciada', 'success');  
+      } else {  
+        addLog(`Error: ${result.message}`, 'error');  
+        setIsRecording(false);  
+        setRecordingStatus('idle');  
+        cleanupAudio();  
+      }  
+    } catch (error) {  
+      addLog('Error al iniciar grabación manual', 'error');  
+      setIsRecording(false);  
+      setRecordingStatus('idle');  
+      cleanupAudio();  
+    }  
+  };  
+
+  // Función para limpiar recursos de audio  
+  const cleanupAudio = () => {  
+    if (animationId) {  
+      cancelAnimationFrame(animationId);  
+      setAnimationId(null);  
+    }  
+    if (mediaStream) {  
+      mediaStream.getTracks().forEach(track => track.stop());  
+      setMediaStream(null);  
+    }  
+    if (audioContext) {  
+      audioContext.close();  
+      setAudioContext(null);  
+    }  
+    setAnalyser(null);  
+  };
+
+
+  // Cleanup cuando el componente se desmonte  
+  useEffect(() => {  
+    return () => {  
+      cleanupAudio();  
+    };  
+  }, []);
+
+
+
+  // Función modificada para detener grabación manual  
+  const stopManualRecording = async () => {  
+    try {  
+      setRecordingStatus('processing');  
+      cleanupAudio();  
+        
+      const result = await window.electronAPI.stopManualRecording();  
+      if (result.success) {  
+        addLog('Grabación manual procesada', 'success');  
+      } else {  
+        addLog(`Error: ${result.message}`, 'error');  
+      }  
+    } catch (error) {  
+      addLog('Error al procesar grabación manual', 'error');  
+    } finally {  
+      setIsRecording(false);  
+      setRecordingStatus('idle');  
+    }  
+  };
+  
+  // Función para manejar click del botón  
+  const handleRecordingToggle = () => {  
+    if (isRecording) {  
+      stopManualRecording();  
+    } else {  
+      startManualRecording();  
+    }  
+  };
+
+
+
   // Función para añadir logs    
   const addLog = (message, type = 'info') => {    
     const timestamp = new Date().toLocaleTimeString();    
@@ -179,7 +334,32 @@ const Ron24_7 = () => {
             disabled={!isActive}    
           >    
             {status === 'listening' ? '🔇 Pausar Escucha' : '🎤 Activar Escucha'}    
-          </button>  
+          </button>
+
+          // Agregar después del botón de "Activar Escucha" en la línea 182  
+          <button  
+            className={`manual-recording-button ${recordingStatus}`}  
+            onClick={handleRecordingToggle}  
+            disabled={!isActive || recordingStatus === 'processing'}  
+            title={isRecording ? 'Detener grabación' : 'Iniciar grabación manual'}  
+          >  
+            <div className="button-content">  
+              <span className="button-text">  
+                {recordingStatus === 'idle' && '🎤 Grabar'}  
+                {recordingStatus === 'recording' && '🔴 Grabando...'}  
+                {recordingStatus === 'processing' && '⏳ Procesando...'}  
+              </span>  
+              {recordingStatus === 'recording' && (  
+                <canvas  
+                  ref={canvasRef}  
+                  className="spectrum-canvas"  
+                  width="120"  
+                  height="30"  
+                />  
+              )}  
+            </div>  
+          </button>
+
               
           <button    
             className="clear-button"    

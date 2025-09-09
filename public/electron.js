@@ -47,7 +47,7 @@ function getPreloadPath() {
   const fallback = path.join(path.dirname(process.execPath), 'preload.js');
   console.warn('[Electron] preload no encontrado en ubicaciones estándar. Usando fallback:', fallback);
   return fallback;
-}
+} 
 
 // --------- Descarga de scripts Python a una carpeta writable ----------
 async function downloadPythonFiles() {
@@ -289,6 +289,47 @@ ipcMain.handle('toggle-ron-247-listening', async () => {
     return { success: false, message: error.message };
   }
 });
+
+
+ipcMain.handle('start-manual-recording', async () => {  
+  try {  
+    if (!ronPythonProcess) {  
+      return { success: false, message: 'Ron 24/7 no está ejecutándose' };  
+    }  
+      
+    const response = await sendCommandToRon('START_MANUAL_RECORDING');  
+      
+    if (response === 'RECORDING_STARTED') {  
+      return { success: true, message: 'Grabación manual iniciada' };  
+    } else {  
+      return { success: false, message: 'Error al iniciar grabación manual' };  
+    }  
+  } catch (error) {  
+    console.error('Error starting manual recording:', error);  
+    return { success: false, message: error.message };  
+  }  
+});  
+  
+ipcMain.handle('stop-manual-recording', async () => {  
+  try {  
+    if (!ronPythonProcess) {  
+      return { success: false, message: 'Ron 24/7 no está ejecutándose' };  
+    }  
+      
+    const response = await sendCommandToRon('STOP_MANUAL_RECORDING');  
+      
+    if (response === 'RECORDING_STOPPED') {  
+      return { success: true, message: 'Grabación manual detenida y procesada' };  
+    } else {  
+      return { success: false, message: 'Error al detener grabación manual' };  
+    }  
+  } catch (error) {  
+    console.error('Error stopping manual recording:', error);  
+    return { success: false, message: error.message };  
+  }  
+});
+
+
 
 ipcMain.handle('get-ron-247-status', async () => {
   if (ronPythonProcess) {

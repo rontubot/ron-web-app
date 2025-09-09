@@ -6,6 +6,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   stopRon247: () => ipcRenderer.invoke('stop-ron-247'),
   getRon247Status: () => ipcRenderer.invoke('get-ron-247-status'),
   toggleRon247Listening: () => ipcRenderer.invoke('toggle-ron-247-listening'),
+  startManualRecording: () => ipcRenderer.invoke('start-manual-recording'),  
+  stopManualRecording: () => ipcRenderer.invoke('stop-manual-recording'),
+
 
   onRon247StatusChange: (callback) => {
     ipcRenderer.on('ron-247-status-changed', callback);

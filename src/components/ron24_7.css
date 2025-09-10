@@ -1,42 +1,548 @@
-.ron247-container {  
-  display: flex;  
-  flex-direction: column;  
-  height: 100vh;  
-  max-width: 1000px;  
-  margin: 0 auto;  
-  background: #f8f9fa;  
-  padding: 20px;  
-  gap: 20px;  
-}  
-  
+/* ===== Layout base ===== */
+.ron247-container {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  max-width: 1000px;
+  margin: 0 auto;
+  background: #f8f9fa;
+  padding: 30px;
+  gap: 20px;
+}
+
+/* ===== Header ===== */
 .ron247-header {  
   background: white;  
-  padding: 24px;  
+  padding: 24px 30px;  
   border-radius: 12px;  
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);  
   display: flex;  
+  flex-wrap: wrap;  
+  align-items: flex-start;  
+  gap: 20px;  
+  min-height: 80px;  
+  overflow: hidden; /* Evita desbordamiento */  
+  box-sizing: border-box;  
+} 
+
+/* Título */
+.ron247-title h1 {
+  margin: 0;
+  font-size: 1.8rem;
+  color: #333;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.ron247-title p {
+  margin: 5px 0 0 0;
+  color: #666;
+  font-size: 0.9rem;
+}
+
+/* Estado */
+.ron247-status {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  background: #f8f9fa;
+  border-radius: 20px;
+}
+
+.status-indicator {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  animation: pulse 2s infinite;
+}
+
+.status-text {
+  font-weight: 500;
+  color: #333;
+}
+
+
+
+/* Botones toggle (Start/Stop) */
+.toggle-button {
+  padding: 12px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  min-width: 120px;
+  white-space: nowrap; /* Evitar quiebres de línea */
+}
+
+.toggle-button.active {
+  background: #dc3545;
+  color: white;
+}
+
+.toggle-button.active:hover {
+  background: #c82333;
+  transform: translateY(-1px);
+}
+
+.toggle-button.inactive {
+  background: #28a745;
+  color: white;
+}
+
+.toggle-button.inactive:hover {
+  background: #218838;
+  transform: translateY(-1px);
+}
+
+.toggle-button:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* Botón limpiar */
+.clear-button {
+  padding: 12px 16px;
+  border: 1px solid #dee2e6;
+  border-radius: 8px;
+  background: white;
+  color: #666;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.clear-button:hover {
+  background: #f8f9fa;
+  border-color: #adb5bd;
+}
+
+/* ===== Tarjetas de info ===== */
+.ron247-info {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 16px;
+}
+
+.info-card {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  text-align: center;
+}
+
+.info-card h3 {
+  margin: 0 0 8px 0;
+  font-size: 1rem;
+  color: #666;
+}
+
+.info-card p {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: #333;
+}
+
+.info-card p.connected {
+  color: #28a745;
+}
+
+.info-card p.disconnected {
+  color: #dc3545;
+}
+
+/* Indicadores con emoji */
+.info-card p.connected::before {
+  content: "🟢 ";
+}
+
+.info-card p.disconnected::before {
+  content: "🔴 ";
+}
+
+/* ===== Instrucciones ===== */
+.ron247-instructions {
+  background: white;
+  padding: 20px;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.ron247-instructions h3 {
+  margin: 0 0 16px 0;
+  color: #333;
+}
+
+.ron247-instructions ul {
+  margin: 0;
+  padding-left: 20px;
+}
+
+.ron247-instructions li {
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.ron247-instructions strong {
+  color: #495057;
+}
+
+/* ===== Logs ===== */
+.ron247-logs {
+  background: white;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 300px;
+}
+
+.logs-header {
+  padding: 16px 20px;
+  border-bottom: 1px solid #dee2e6;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.logs-header h3 {
+  margin: 0;
+  color: #333;
+}
+
+.logs-count {
+  background: #e9ecef;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.8rem;
+  color: #666;
+}
+
+.logs-container {
+  flex: 1;
+  overflow-y: auto;
+  padding: 16px 20px;
+  max-height: 400px;
+}
+
+/* Estado vacío */
+.no-logs {
+  text-align: center;
+  color: #666;
+  margin-top: 40px;
+}
+
+.no-logs p {
+  margin: 8px 0;
+}
+
+/* Entradas */
+.log-entry {
+  display: flex;
+  gap: 12px;
+  padding: 8px 0;
+  border-bottom: 1px solid #f8f9fa;
+  font-size: 0.9rem;
+  animation: fadeIn 0.3s ease-in;
+}
+
+.log-entry:last-child {
+  border-bottom: none;
+}
+
+.log-time {
+  color: #6c757d;
+  font-family: monospace;
+  min-width: 80px;
+}
+
+.log-message {
+  flex: 1;
+  color: #333;
+}
+
+.log-entry.success .log-message {
+  color: #28a745;
+}
+
+.log-entry.error .log-message {
+  color: #dc3545;
+}
+
+.log-entry.voice .log-message {
+  color: #007bff;
+  font-style: italic;
+}
+
+/* ===== Scrollbar de logs (Webkit) ===== */
+.logs-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+.logs-container::-webkit-scrollbar-track {
+  background: #f1f1f1;
+  border-radius: 3px;
+}
+
+.logs-container::-webkit-scrollbar-thumb {
+  background: #c1c1c1;
+  border-radius: 3px;
+}
+
+.logs-container::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* ===== Botón "Listening" ===== */
+.listening-toggle-button {
+  padding: 12px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  min-width: 140px;
+  background: #007bff;
+  color: white;
+}
+
+.listening-toggle-button:hover {
+  background: #0056b3;
+  transform: translateY(-1px);
+}
+
+.listening-toggle-button:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+  transform: none;
+}
+
+/* ===== Botón de grabación manual ===== */
+.manual-recording-button {
+  padding: 12px 20px;
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  min-width: 140px;
+  white-space: nowrap;
+}
+
+.manual-recording-button .button-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* Estados del botón */
+.manual-recording-button.idle {
+  background: #007bff;
+  color: white;
+}
+
+.manual-recording-button.idle:hover {
+  background: #0056b3;
+  transform: translateY(-1px);
+}
+
+.manual-recording-button.recording {
+  background: #dc3545;
+  color: white;
+  animation: pulse 1.5s infinite;
+}
+
+.manual-recording-button.processing {
+  background: #ffc107;
+  color: #212529;
+}
+
+.manual-recording-button:disabled {
+  background: #6c757d;
+  cursor: not-allowed;
+  transform: none;
+  animation: none;
+}
+
+/* Espectro visual */
+.spectrum-canvas {
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.1);
+  opacity: 0.9;
+}
+
+.manual-recording-button.recording .spectrum-canvas {
+  animation: spectrumGlow 2s infinite alternate;
+}
+
+/* ===== Indicador de carga (genérico) ===== */
+.loading-indicator {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #f3f3f3;
+  border-top: 2px solid #007bff;
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+/* ===== Animaciones ===== */
+@keyframes pulse {
+  0% { opacity: 1; }
+  50% { opacity: 0.5; }
+  100% { opacity: 1; }
+}
+
+@keyframes spectrumGlow {
+  0%   { box-shadow: 0 0 5px rgba(255, 255, 255, 0.3); }
+  100% { box-shadow: 0 0 15px rgba(255, 255, 255, 0.6); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes spin {
+  0%   { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
+}
+
+/* ===== Responsive 768px ===== */
+@media (max-width: 768px) {
+  .ron247-container {
+    padding: 20px;
+    gap: 15px;
+  }
+
+  .ron247-header {
+    padding: 20px;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 15px;
+  }
+
+  .ron247-title h1 {
+    font-size: 1.5rem;
+    text-align: center;
+  }
+
+  .ron247-status {
+    justify-content: center;
+  }
+
+  /* Controles en columna + ancho completo */
+  .ron247-controls {
+    margin: 12px 0;
+    padding: 0 10px;
+    order: 3;
+    justify-content: center;
+    width: 100%;
+    flex-direction: column !important;
+    gap: 10px !important;
+  }
+
+  .toggle-button,
+  .listening-toggle-button,
+  .clear-button,
+  .manual-recording-button {
+    width: 100% !important;
+    max-width: none !important;
+    min-width: auto !important;
+  }
+
+  .toggle-button {
+    flex: 1;
+    max-width: 200px;
+    margin: 0 auto;
+  }
+
+  .ron247-info {
+    grid-template-columns: 1fr;
+  }
+
+  .info-card {
+    padding: 16px;
+  }
+
+  .ron247-instructions {
+    padding: 16px;
+  }
+
+  .ron247-instructions ul {
+    padding-left: 16px;
+  }
+
+  .logs-header {
+    padding: 12px 16px;
+  }
+
+  .logs-container {
+    padding: 12px 16px;
+  }
+
+  .log-entry {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .log-time {
+    min-width: auto;
+    font-size: 0.8rem;
+  }
+}
+
+/* ===== Responsive 480px ===== */
+@media (max-width: 480px) {
+  .ron247-header {
+    padding: 15px;
+  }
+
+  .toggle-button,
+  .listening-toggle-button,
+  .clear-button,
+  .manual-recording-button {
+    padding: 10px 16px;
+    font-size: 0.9rem;
+    min-width: auto;
+  }
+
+  .spectrum-canvas {
+    width: 100px;
+    height: 25px;
+  }
+}
+
+
+
+/* --- FIX DEFINITIVO UBICACIÓN DE BOTONES EN HEADER --- */
+
+/* Asegura que el header cree nuevas filas correctamente */
+.ron247-header {  
+  display: flex;  
   justify-content: space-between;  
   align-items: center;  
-  flex-wrap: wrap;  
-  gap: 20px;  
-}  
-  
-.ron247-title h1 {  
-  margin: 0;  
-  font-size: 1.8rem;  
-  color: #333;  
-  display: flex;  
-  align-items: center;  
-  gap: 10px;  
-}  
-  
-.ron247-title p {  
-  margin: 5px 0 0 0;  
-  color: #666;  
-  font-size: 0.9rem;  
-}  
-  
+  flex-wrap: nowrap; /* Cambiar de wrap a nowrap para pantallas grandes */  
+  gap: 15px;  
+  min-height: 80px;
+  padding: 16px;  
+}
+/* Columnas */
+.ron247-title {  
+  flex: 1 1 280px;  
+  min-width: 0; /* Permite que se comprima */  
+}
 .ron247-status {  
+  flex: 0 0 auto;  
   display: flex;  
   align-items: center;  
   gap: 10px;  
@@ -44,525 +550,88 @@
   background: #f8f9fa;  
   border-radius: 20px;  
 }  
-  
-.status-indicator {  
-  width: 12px;  
-  height: 12px;  
-  border-radius: 50%;  
-  animation: pulse 2s infinite;  
-}  
-  
-@keyframes pulse {  
-  0% { opacity: 1; }  
-  50% { opacity: 0.5; }  
-  100% { opacity: 1; }  
-}  
-  
-.status-text {  
-  font-weight: 500;  
-  color: #333;  
-}  
-  
+
+/* CONTROLES: eliminar cualquier min-width:fit-content / flex-shrink:0 previos */
 .ron247-controls {  
+  flex: 1 1 100%;  
   display: flex;  
-  gap: 12px;  
-}  
-  
-.toggle-button {  
-  padding: 12px 24px;  
-  border: none;  
-  border-radius: 8px;  
-  font-size: 1rem;  
-  font-weight: 600;  
-  cursor: pointer;  
-  transition: all 0.3s ease;  
-  min-width: 120px;  
-}  
-  
-.toggle-button.active {  
-  background: #dc3545;  
-  color: white;  
-}  
-  
-.toggle-button.active:hover {  
-  background: #c82333;  
-  transform: translateY(-1px);  
-}  
-  
-.toggle-button.inactive {  
-  background: #28a745;  
-  color: white;  
-}  
-  
-.toggle-button.inactive:hover {  
-  background: #218838;  
-  transform: translateY(-1px);  
-}  
-  
-.toggle-button:disabled {  
-  background: #6c757d;  
-  cursor: not-allowed;  
-  transform: none;  
-}  
-  
-.clear-button {  
-  padding: 12px 16px;  
-  border: 1px solid #dee2e6;  
-  border-radius: 8px;  
-  background: white;  
-  color: #666;  
-  cursor: pointer;  
-  transition: all 0.2s ease;  
-}  
-  
-.clear-button:hover {  
-  background: #f8f9fa;  
-  border-color: #adb5bd;  
-}  
-  
-.ron247-info {  
-  display: grid;  
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));  
-  gap: 16px;  
-}  
-  
-.info-card {  
-  background: white;  
-  padding: 20px;  
-  border-radius: 8px;  
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);  
-  text-align: center;  
-}  
-  
-.info-card h3 {  
-  margin: 0 0 8px 0;  
-  font-size: 1rem;  
-  color: #666;  
-}  
-  
-.info-card p {  
-  margin: 0;  
-  font-size: 1.1rem;  
-  font-weight: 600;  
-  color: #333;  
-}  
-  
-.info-card p.connected {  
-  color: #28a745;  
-}  
-  
-.info-card p.disconnected {  
-  color: #dc3545;  
-}  
-  
-.ron247-instructions {  
-  background: white;  
-  padding: 20px;  
-  border-radius: 8px;  
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);  
-}  
-  
-.ron247-instructions h3 {  
-  margin: 0 0 16px 0;  
-  color: #333;  
-}  
-  
-.ron247-instructions ul {  
-  margin: 0;  
-  padding-left: 20px;  
-}  
-  
-.ron247-instructions li {  
-  margin-bottom: 8px;  
-  line-height: 1.5;  
-}  
-  
-.ron247-instructions strong {  
-  color: #495057;  
-}  
-  
-.ron247-logs {  
-  background: white;  
-  border-radius: 8px;  
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);  
-  flex: 1;  
-  display: flex;  
-  flex-direction: column;  
-  min-height: 300px;  
-}  
-  
-.logs-header {  
-  padding: 16px 20px;  
-  border-bottom: 1px solid #dee2e6;  
-  display: flex;  
-  justify-content: space-between;  
+  flex-wrap: wrap;  
+  justify-content: center;  
   align-items: center;  
-}  
-  
-.logs-header h3 {  
-  margin: 0;  
-  color: #333;  
-}  
-  
-.logs-count {  
-  background: #e9ecef;  
-  padding: 4px 8px;  
-  border-radius: 12px;  
-  font-size: 0.8rem;  
-  color: #666;  
-}  
-  
-.logs-container {  
-  flex: 1;  
-  overflow-y: auto;  
-  padding: 16px 20px;  
-  max-height: 400px;  
-}  
-  
-.no-logs {  
-  text-align: center;  
-  color: #666;  
-  margin-top: 40px;  
-}  
-  
-.no-logs p {  
-  margin: 8px 0;  
-}  
-  
-.log-entry {  
-  display: flex;  
-  gap: 12px;  
-  padding: 8px 0;  
-  border-bottom: 1px solid #f8f9fa;  
+  gap: 8px;  
+  margin-top: 8px;  
+  box-sizing: border-box;  
+  max-width: 100%; /* Fuerza que no se desborde */  
+} 
+
+/* Botones consistentes */
+.toggle-button,  
+.listening-toggle-button,  
+.manual-recording-button,  
+.clear-button {  
+  flex: 1 1 calc(50% - 4px); /* Máximo 2 por fila en desktop */  
+  min-width: 120px;  
+  max-width: 200px;  
+  padding: 10px 12px;  
   font-size: 0.9rem;  
-}  
-  
-.log-entry:last-child {  
-  border-bottom: none;  
-}  
-  
-.log-time {  
-  color: #6c757d;  
-  font-family: monospace;  
-  min-width: 80px;  
-}  
-  
-.log-message {  
-  flex: 1;  
-  color: #333;  
-}  
-  
-.log-entry.success .log-message {  
-  color: #28a745;  
-}  
-  
-.log-entry.error .log-message {  
-  color: #dc3545;  
-}  
-  
-.log-entry.voice .log-message {  
-  color: #007bff;  
-  font-style: italic;  
-}  
-  
-/* Responsive design */  
+  text-align: center;  
+  box-sizing: border-box;  
+  white-space: nowrap;  
+  overflow: hidden;  
+  text-overflow: ellipsis;  
+} 
+
 @media (max-width: 768px) {  
-  .ron247-container {  
-    padding: 10px;  
-    gap: 15px;  
-  }  
-  
   .ron247-header {  
-    padding: 16px;  
+    flex-wrap: wrap;  
     flex-direction: column;  
-    align-items: stretch;  
-    gap: 15px;  
   }  
+ 
   
-  .ron247-title h1 {  
-    font-size: 1.5rem;  
+  .ron247-title {  
+    flex: none;  
     text-align: center;  
   }  
   
   .ron247-status {  
-    justify-content: center;  
+    flex: none;  
+    align-self: center;  
   }  
   
   .ron247-controls {  
-    justify-content: center;  
-  }  
+	  display: flex;  
+	  gap: 12px;  
+	  flex-shrink: 0;  
+	  min-width: fit-content;  		
+	  visibility: visible; /* Forzar visibilidad */  
+	} 
   
-  .toggle-button {  
-    flex: 1;  
-    max-width: 200px;  
-  }  
-  
-  .ron247-info {  
-    grid-template-columns: 1fr;  
-  }  
-  
-  .info-card {  
-    padding: 16px;  
-  }  
-  
-  .ron247-instructions {  
-    padding: 16px;  
-  }  
-  
-  .ron247-instructions ul {  
-    padding-left: 16px;  
-  }  
-  
-  .logs-header {  
-    padding: 12px 16px;  
-  }  
-  
-  .logs-container {  
-    padding: 12px 16px;  
-  }  
-  
-  .log-entry {  
-    flex-direction: column;  
-    gap: 4px;  
-  }  
-  
-  .log-time {  
-    min-width: auto;  
-    font-size: 0.8rem;  
-  }  
-}  
-  
-/* Scrollbar personalizado para logs */  
-.logs-container::-webkit-scrollbar {  
-  width: 6px;  
-}  
-  
-.logs-container::-webkit-scrollbar-track {  
-  background: #f1f1f1;  
-  border-radius: 3px;  
-}  
-  
-.logs-container::-webkit-scrollbar-thumb {  
-  background: #c1c1c1;  
-  border-radius: 3px;  
-}  
-  
-.logs-container::-webkit-scrollbar-thumb:hover {  
-  background: #a8a8a8;  
-}  
-  
-/* Animaciones adicionales */  
-.log-entry {  
-  animation: fadeIn 0.3s ease-in;  
-}  
-  
-@keyframes fadeIn {  
-  from {  
-    opacity: 0;  
-    transform: translateY(10px);  
-  }  
-  to {  
-    opacity: 1;  
-    transform: translateY(0);  
-  }  
-}  
-  
-/* Estados de conexión */  
-.info-card p.connected::before {  
-  content: "🟢 ";  
-}  
-  
-.info-card p.disconnected::before {  
-  content: "🔴 ";  
-}  
-  
-/* Mejoras visuales para botones */  
-.toggle-button:active {  
-  transform: translateY(1px);  
-}  
-  
-.clear-button:active {  
-  transform: translateY(1px);  
-}  
-  
-/* Indicador de carga */  
-.loading-indicator {  
-  display: inline-block;  
-  width: 12px;  
-  height: 12px;  
-  border: 2px solid #f3f3f3;  
-  border-top: 2px solid #007bff;  
-  border-radius: 50%;  
-  animation: spin 1s linear infinite;  
-}  
-  
-@keyframes spin {  
-  0% { transform: rotate(0deg); }  
-  100% { transform: rotate(360deg); }  
-}
-
-
-/* Mejoras para responsive en ron247-header */  
-.ron247-header {  
-  background: white;  
-  padding: 16px 20px;  
-  border-radius: 12px;  
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);  
-  display: flex;  
-  justify-content: space-between;  
-  align-items: center;  
-  flex-wrap: wrap;  
-  gap: 15px;  
-  min-height: 80px; /* Asegurar altura mínima */  
-}  
-  
-.ron247-controls {  
-  display: flex;  
-  gap: 12px;  
-  flex-shrink: 0; /* Evitar que se comprima */  
-  min-width: fit-content;  
-}  
-  
-.toggle-button {  
-  padding: 12px 20px;  
-  border: none;  
-  border-radius: 8px;  
-  font-size: 1rem;  
-  font-weight: 600;  
-  cursor: pointer;  
-  transition: all 0.3s ease;  
-  min-width: 120px;  
-  white-space: nowrap; /* Evitar que el texto se rompa */  
-}  
-  
-/* Responsive específico para móviles */  
-@media (max-width: 768px) {  
-  .ron247-header {  
-    flex-direction: column;  
-    align-items: stretch;  
-    gap: 15px;  
-    padding: 16px;  
-  }  
-    
-  .ron247-controls {  
-    order: 3; /* Mover controles al final */  
-    justify-content: center;  
+  .toggle-button,  
+  .listening-toggle-button,  
+  .manual-recording-button,  
+  .clear-button {  
+    flex: none;  
     width: 100%;  
-  }  
-    
-  .toggle-button {  
-    flex: 1;  
-    max-width: 200px;  
-    margin: 0 auto;  
+    max-width: none;  
+    min-width: 0;  
   }  
 }  
   
 @media (max-width: 480px) {  
   .ron247-header {  
-    padding: 12px;  
+    padding: 10px 12px;  
   }  
-    
-  .toggle-button {  
-    padding: 10px 16px;  
-    font-size: 0.9rem;  
-    min-width: 100px;  
+  
+  .toggle-button,  
+  .listening-toggle-button,  
+  .manual-recording-button,  
+  .clear-button {  
+    padding: 8px 12px;  
+    font-size: 0.85rem;  
+  }  
+  
+  .spectrum-canvas {  
+    width: 80px;  
+    height: 20px;  
   }  
 }
-
-.listening-toggle-button {  
-  padding: 12px 20px;  
-  border: none;  
-  border-radius: 8px;  
-  font-size: 1rem;  
-  font-weight: 600;  
-  cursor: pointer;  
-  transition: all 0.3s ease;  
-  min-width: 140px;  
-  background: #007bff;  
-  color: white;  
-}  
-  
-.listening-toggle-button:hover {  
-  background: #0056b3;  
-  transform: translateY(-1px);  
-}  
-  
-.listening-toggle-button:disabled {  
-  background: #6c757d;  
-  cursor: not-allowed;  
-  transform: none;  
-}
-
-
-
-/* Agregar a ron24_7.css */  
-.manual-recording-button {  
-  padding: 12px 20px;  
-  border: none;  
-  border-radius: 8px;  
-  font-size: 1rem;  
-  font-weight: 600;  
-  cursor: pointer;  
-  transition: all 0.3s ease;  
-  min-width: 140px;  
-  position: relative;  
-}  
-  
-.manual-recording-button.idle {  
-  background: #007bff;  
-  color: white;  
-}  
-  
-.manual-recording-button.idle:hover {  
-  background: #0056b3;  
-  transform: translateY(-1px);  
-}  
-  
-.manual-recording-button.recording {  
-  background: #dc3545;  
-  color: white;  
-  animation: pulse 1.5s infinite;  
-}  
-  
-.manual-recording-button.processing {  
-  background: #ffc107;  
-  color: #212529;  
-}  
-  
-.manual-recording-button:disabled {  
-  background: #6c757d;  
-  cursor: not-allowed;  
-  transform: none;  
-  animation: none;  
-}  
-  
-@keyframes pulse {  
-  0% { opacity: 1; }  
-  50% { opacity: 0.7; }  
-  100% { opacity: 1; }  
-}
-
-
-.manual-recording-button .button-content {  
-  display: flex;  
-  flex-direction: column;  
-  align-items: center;  
-  gap: 8px;  
-}  
-  
-.spectrum-canvas {  
-  border-radius: 4px;  
-  background: rgba(0, 0, 0, 0.1);  
-  opacity: 0.9;  
-}  
-  
-.manual-recording-button.recording .spectrum-canvas {  
-  animation: spectrumGlow 2s infinite alternate;  
-}  
-  
-@keyframes spectrumGlow {  
-  0% { box-shadow: 0 0 5px rgba(255, 255, 255, 0.3); }  
-  100% { box-shadow: 0 0 15px rgba(255, 255, 255, 0.6); }  
-}
-
-

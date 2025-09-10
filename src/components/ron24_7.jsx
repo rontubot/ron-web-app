@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';    
 import { useAuth } from '../context/authcontext';    
-import './ron24_7.css';  
-import React, { useState, useEffect, useRef, useCallback } from 'react';  
+import './ron24_7.css';    
     
 const Ron24_7 = () => {    
   const { user } = useAuth();    
@@ -336,7 +335,7 @@ const Ron24_7 = () => {
             {status === 'listening' ? '🔇 Pausar Escucha' : '🎤 Activar Escucha'}    
           </button>
 
-          // Agregar después del botón de "Activar Escucha" en la línea 182  
+  
           <button  
             className={`manual-recording-button ${recordingStatus}`}  
             onClick={handleRecordingToggle}  

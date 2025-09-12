@@ -1,6 +1,10 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';    
 import { useAuth } from '../context/authcontext';    
 import './ron24_7.css';    
+
+
+
+
     
 const Ron24_7 = () => {    
   const { user } = useAuth();    
@@ -17,6 +21,21 @@ const Ron24_7 = () => {
   const [animationId, setAnimationId] = useState(null);  
   const canvasRef = useRef(null);     
     
+ 
+  const getStatusColor = () => {
+  switch ((status || '').toLowerCase()) {
+    case 'active':
+    case 'listening':
+      return '#28a745';   // verde
+    case 'conversing':
+      return '#ffc107';   // amarillo
+    case 'inactive':
+    default:
+      return '#6c757d';   // gris
+  }
+};
+
+
  
   // Función para configurar el análisis de audio  
   const setupAudioAnalysis = async () => {  
@@ -196,19 +215,19 @@ const Ron24_7 = () => {
   };  
   
   // Función para verificar estado con useCallback para evitar dependencias circulares    
-  const checkRon247Status = useCallback(async () => {    
-    try {    
-      const status = await window.electronAPI.getRon247Status();    
-      setIsActive(status.isRunning);    
-      setStatus(status.status.toLowerCase());    
-      setIsConnected(true);    
-      addLog(`Estado inicial: ${status.isRunning ? 'Activo' : 'Inactivo'}`, 'success');    
-    } catch (error) {    
-      console.error('Error checking Ron 24/7 status:', error);    
-      setIsConnected(false);    
-      addLog('Error al conectar con Ron 24/7', 'error');    
-    }    
-  }, []);    
+  const checkRon247Status = useCallback(async () => {
+    try {
+      const s = await window.electronAPI.getRon247Status();
+      setIsActive(!!s.isRunning);
+      setStatus((s.status || 'inactive').toLowerCase());
+      setIsConnected(true);
+      addLog(`Estado inicial: ${s.isRunning ? 'Activo' : 'Inactivo'}`, 'success');
+    } catch (error) {
+      console.error('Error checking Ron 24/7 status:', error);
+      setIsConnected(false);
+      addLog('Error al conectar con Ron 24/7', 'error');
+    }  
+    }, []);    
     
   // Verificar estado inicial de Ron 24/7    
   useEffect(() => {    
@@ -216,20 +235,20 @@ const Ron24_7 = () => {
   }, [checkRon247Status]);    
   
   // Verificación periódica del estado (NUEVA)  
-  useEffect(() => {  
-    const interval = setInterval(async () => {  
-      if (isActive) {  
-        try {  
-          const status = await window.electronAPI.getRon247Status();  
-          setStatus(status.status.toLowerCase());  
-        } catch (error) {  
-          console.error('Error checking status:', error);  
-        }  
-      }  
-    }, 2000);  
-  
-    return () => clearInterval(interval);  
-  }, [isActive]);  
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      if (isActive) {
+        try {
+          const s = await window.electronAPI.getRon247Status();
+          setStatus((s.status || 'inactive').toLowerCase());
+        } catch (error) {
+          console.error('Error checking status:', error);
+        }
+      }
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [isActive]); 
     
   const toggleRon247 = async () => {    
     try {    
@@ -260,37 +279,53 @@ const Ron24_7 = () => {
     addLog('Logs limpiados', 'info');    
   };    
     
-  // Escuchar eventos de Ron 24/7    
-  useEffect(() => {    
-    if (window.electronAPI) {    
-      // Escuchar cambios de estado    
-      window.electronAPI.onRon247StatusChange((event, newStatus) => {    
-        setStatus(newStatus.toLowerCase());    
-        addLog(`Estado cambiado a: ${newStatus}`, 'info');    
-      });    
-    
-      // Escuchar salida de Ron 24/7    
-      window.electronAPI.onRon247Output((event, output) => {    
-        addLog(`Ron: ${output}`, 'voice');    
-      });    
-    
-      // Cleanup listeners al desmontar    
-      return () => {    
-        window.electronAPI.removeAllListeners('ron-247-status-changed');    
-        window.electronAPI.removeAllListeners('ron-247-output');    
-      };    
-    }    
-  }, []);    
-    
-  const getStatusColor = () => {    
-    switch (status) {    
-      case 'active':    
-      case 'listening': return '#28a745';    
-      case 'conversing': return '#ffc107';    
-      case 'inactive': return '#6c757d';    
-      default: return '#6c757d';    
-    }    
-  };    
+const sanitizeRonText = (raw = '') => {
+  if (!raw || typeof raw !== 'string') return '';
+  const lines = raw.split(/\r?\n/).map(l => l.trim());
+  const isLog = (l) =>
+    !l ||
+    l.startsWith('📁') ||
+    l.startsWith('[RON]') ||
+    l.toLowerCase().startsWith('info:') ||
+    l.toLowerCase().startsWith('debug:') ||
+    l.toLowerCase().includes('archivo de memoria no encontrado') ||
+    l.toLowerCase().includes('descargando') ||
+    l.toLowerCase().includes('control server') ||
+    l.toLowerCase().includes('ron 24/7') ||
+    /^http(s)?:\/\//i.test(l);
+  const content = lines.filter(l => !isLog(l));
+  if (content.length === 0) {
+    const last = lines.reverse().find(l => l && !isLog(l));
+    return last || raw;
+  }
+  return content.join('\n').trim();
+};
+
+// Escuchar eventos de Ron 24/7
+useEffect(() => {
+  if (!window.electronAPI) return;
+
+  // PRELOAD ya llama callback(status) —> aquí solo recibes el string status
+  const offStatus = window.electronAPI.onRon247StatusChange((newStatus) => {
+    const s = (newStatus || '').toLowerCase();
+    if (s) setStatus(s);
+    addLog(`Estado cambiado a: ${newStatus}`, 'info');
+  });
+
+  // PRELOAD ya llama callback(output) —> aquí solo recibes el string output
+  const offOutput = window.electronAPI.onRon247Output((output) => {
+    const text = typeof output === 'string' ? output : String(output ?? '');
+    const clean = sanitizeRonText(text);
+    if (clean) addLog(`Ron: ${clean}`, 'voice');
+  });
+
+  // cleanup usando las funciones de desuscripción que devuelve el preload
+  return () => {
+    offStatus?.();
+    offOutput?.();
+  };
+}, []);
+
     
   const getStatusText = () => {    
     switch (status) {    

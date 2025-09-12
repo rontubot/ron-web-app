@@ -170,6 +170,65 @@ async function sendCommandToRon(command) {
 }
 // ==================== IPC: Ron 24/7 ====================
 
+ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
+  if (!text || typeof text !== 'string') {
+    return { ok: false, text: 'Mensaje vacío' };
+  }
+
+  // 1) Si el 24/7 está corriendo, intenta vía socket
+  if (ronPythonProcess) {
+    try {
+      const reply = await sendCommandToRon(`ASK::${text}`);
+      if (reply && typeof reply === 'string') {
+        return { ok: true, text: reply };
+      }
+    } catch (e) {
+      console.warn('[ask-ron] socket error, voy a fallback:', e.message);
+    }
+  }
+
+  // 2) Fallback: proceso Python de una sola ejecución
+  try {
+    const { baseDir } = await downloadPythonFiles();
+
+    const py = spawn('python', [
+      '-u', '-X', 'utf8',
+      '-c',
+      [
+        "import sys, json, os",
+        `sys.path.insert(0, r"${baseDir.replace(/\\/g, '\\\\')}")`,
+        "from core.assistant import generate_response_no_memory",
+        "user_input = sys.argv[1]",
+        "resp = generate_response_no_memory(user_input)",
+        "print(resp if isinstance(resp, str) else str(resp))",
+      ].join(';'),
+      text,
+    ], {
+      env: {
+        ...process.env,
+        PYTHONUTF8: '1',
+        PYTHONIOENCODING: 'utf-8',
+        PYTHONUNBUFFERED: '1',
+      },
+    });
+
+    let out = '', err = '';
+    await new Promise((resolve, reject) => {
+      py.stdout.on('data', d => (out += d.toString()));
+      py.stderr.on('data', d => (err += d.toString()));
+      py.on('error', reject);
+      py.on('close', code => code === 0 ? resolve() : reject(new Error(`py exit ${code}: ${err}`)));
+    });
+
+    out = (out || '').trim();
+    return { ok: true, text: out || 'Sin respuesta' };
+  } catch (e) {
+    console.error('[ask-ron] error fallback python:', e);
+    return { ok: false, text: 'Error al obtener respuesta' };
+  }
+});
+
+
 ipcMain.handle('start-ron-247', async (_event, userData) => {
   try {
     if (ronPythonProcess) {
@@ -342,6 +401,7 @@ ipcMain.handle('get-ron-247-status', async () => {
   }
   return { status: ron247Status, isRunning: ronPythonProcess !== null };
 });
+
 
 // ============= OPCIONAL: Proxy HTTP por IPC (evita CORS) =============
 ipcMain.handle('ron:req', async (_evt, { path: subpath = '/', method = 'GET', headers = {}, body } = {}) => {

@@ -14,7 +14,9 @@
     "electron-dev": "ELECTRON_IS_DEV=true electron .",
     "electron-pack": "electron-builder",
     "preelectron-pack": "npm run build",
-    "postinstall": "electron-builder install-app-deps"
+    "postinstall": "electron-builder install-app-deps",
+    "predist": "node scripts/make-ico.js",
+    "dist": "electron-builder --win"
   },
   "dependencies": {
     "axios": "1.4.0",
@@ -35,13 +37,15 @@
     "@types/react": "18.2.0",
     "@types/react-dom": "18.2.0",
     "electron": "27.0.0",
-    "electron-builder": "23.6.0"
+    "electron-builder": "23.6.0",
+    "png-to-ico": "^2.1.8"
   },
   "build": {
     "appId": "com.ron.assistant",
     "productName": "Ron Assistant",
     "directories": {
-      "output": "dist"
+      "output": "dist",
+      "buildResources": "build"
     },
     "files": [
       "build/**/*",
@@ -50,16 +54,12 @@
       "python-scripts/**/*",
       "node_modules/**/*"
     ],
-    "extraFiles": [
-      "public/electron.js",
-      "preload.js"
-    ],
     "extraResources": [
       "requirements.txt"
     ],
     "win": {
       "target": "nsis",
-      "icon": "build/icon.ico"
+      "icon": "build/icons/icon.ico"
     },
     "mac": {
       "target": "dmg",

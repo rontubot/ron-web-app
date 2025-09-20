@@ -6,6 +6,8 @@ const net = require('net');
 const fs = require('fs').promises;
 const fs2 = require('fs');
 
+
+
 // (opcional) variables de entorno para el proceso principal
 try { require('dotenv').config(); } catch (_) {}
 
@@ -167,66 +169,79 @@ async function sendCommandToRon(command) {
   } catch (_e) {
     return await tryConnect('localhost');
   }
+
 }
-// ==================== IPC: Ron 24/7 ====================
+
 
 ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
-  if (!text || typeof text !== 'string') {
-    return { ok: false, text: 'Mensaje vacío' };
-  }
+  const q = (text || '').trim();
+  if (!q) return { ok: false, text: 'Mensaje vacío' };
 
-  // 1) Si el 24/7 está corriendo, intenta vía socket
-  if (ronPythonProcess) {
+  // 1) Resolver API base (como ya lo tenés)
+  const userData = app.getPath('userData');
+  let apiBase = (process.env.RON_API_URL || '').trim();
+  try {
+    if (!apiBase && fs2.existsSync(path.join(userData, 'config.json'))) {
+      const cfg = JSON.parse(fs2.readFileSync(path.join(userData, 'config.json'), 'utf-8'));
+      apiBase = (cfg.RON_API_URL || '').trim();
+    }
+  } catch {}
+  if (!apiBase) apiBase = 'https://ron-production.up.railway.app';
+  const base = apiBase.replace(/\/+$/, '');
+  const looksLikeUrl = /^https?:\/\/[^/]+/i.test(base);
+
+  // 2) HTTP → Railway pidiendo JSON con comandos (execute: true, return_json: true)
+  if (looksLikeUrl) {
     try {
-      const reply = await sendCommandToRon(`ASK::${text}`);
-      if (reply && typeof reply === 'string') {
-        return { ok: true, text: reply };
+      const res = await fetchImpl(`${base}/ron`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: q, username, return_json: true, source: 'desktop' }),
+      });
+
+      const raw = await res.text();
+      let data;
+      try { data = JSON.parse(raw); } catch { data = { user_response: raw }; }
+
+      // --- NUEVO: si vienen commands, ejecutarlos en local vía socket 9999 ---
+      if (Array.isArray(data?.commands) && data.commands.length > 0) {
+        // Enviamos TODA la respuesta como JSON en EXEC:: para que el launcher ejecute
+        try {
+          const payload = JSON.stringify({ commands: data.commands });
+          console.log('[ask-ron] reenviando commands al launcher:', data.commands);
+          await sendCommandToRon(`EXEC::${payload}`);
+          mainWindow?.webContents.send('ron-247-output', '→ Comandos del chat ejecutados localmente\n');
+        } catch (e) {
+          console.error('[ask-ron] error ejecutando comandos vía socket:', e);
+        }
       }
-    } catch (e) {
-      console.warn('[ask-ron] socket error, voy a fallback:', e.message);
+
+      const replyText =
+        data?.user_response ??
+        data?.text ??
+        data?.message ??
+        (typeof data === 'string' ? data : '') ??
+        '';
+
+      return { ok: res.ok, text: replyText || 'Sin respuesta' };
+    } catch (err) {
+      console.warn('[ask-ron] fetch a Railway falló, uso fallback socket CHAT::', err?.message || err);
     }
   }
 
-  // 2) Fallback: proceso Python de una sola ejecución
+  // 3) Fallback sin internet: pedir al launcher que haga el chat y ejecute local
   try {
-    const { baseDir } = await downloadPythonFiles();
-
-    const py = spawn('python', [
-      '-u', '-X', 'utf8',
-      '-c',
-      [
-        "import sys, json, os",
-        `sys.path.insert(0, r"${baseDir.replace(/\\/g, '\\\\')}")`,
-        "from core.assistant import generate_response_no_memory",
-        "user_input = sys.argv[1]",
-        "resp = generate_response_no_memory(user_input)",
-        "print(resp if isinstance(resp, str) else str(resp))",
-      ].join(';'),
-      text,
-    ], {
-      env: {
-        ...process.env,
-        PYTHONUTF8: '1',
-        PYTHONIOENCODING: 'utf-8',
-        PYTHONUNBUFFERED: '1',
-      },
-    });
-
-    let out = '', err = '';
-    await new Promise((resolve, reject) => {
-      py.stdout.on('data', d => (out += d.toString()));
-      py.stderr.on('data', d => (err += d.toString()));
-      py.on('error', reject);
-      py.on('close', code => code === 0 ? resolve() : reject(new Error(`py exit ${code}: ${err}`)));
-    });
-
-    out = (out || '').trim();
-    return { ok: true, text: out || 'Sin respuesta' };
+    const resp = await sendCommandToRon(`CHAT::${q}`);
+    return { ok: true, text: resp || 'Sin respuesta' };
   } catch (e) {
-    console.error('[ask-ron] error fallback python:', e);
-    return { ok: false, text: 'Error al obtener respuesta' };
+    console.error('[ask-ron] socket fallback también falló:', e);
+    return { ok: false, text: 'No se pudo contactar al backend' };
   }
 });
+
+
+
+
 
 
 ipcMain.handle('start-ron-247', async (_event, userData) => {

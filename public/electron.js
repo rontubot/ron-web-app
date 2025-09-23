@@ -20,6 +20,7 @@ const fetchImpl = global.fetch || (async (...args) => {
 // (opcional) URL backend si luego usas el proxy IPC ron:req
 const API_URL = process.env.RON_API_URL || 'https://';
 
+let AUTH_TOKEN = null;
 let mainWindow;
 let ronPythonProcess = null;
 let ron247Status = 'inactive'; // 'inactive' | 'starting' | 'listening' | 'conversing'
@@ -60,36 +61,49 @@ async function downloadPythonFiles() {
 
   const files = [
     { url: `${baseUrl}/local/ron_launcher.py`, path: path.join(baseDir, 'ron_launcher.py') },
-    { url: `${baseUrl}/core/assistant.py`, path: path.join(baseDir, 'core', 'assistant.py') },
-    { url: `${baseUrl}/core/memory.py`, path: path.join(baseDir, 'core', 'memory.py') },
-    { url: `${baseUrl}/core/commands.py`, path: path.join(baseDir, 'core', 'commands.py') },
-    { url: `${baseUrl}/config.py`, path: path.join(baseDir, 'config.py') },
+    { url: `${baseUrl}/core/assistant.py`,     path: path.join(baseDir, 'core', 'assistant.py') },
+    { url: `${baseUrl}/core/memory.py`,        path: path.join(baseDir, 'core', 'memory.py') },
+    { url: `${baseUrl}/core/commands.py`,      path: path.join(baseDir, 'core', 'commands.py') },
+    { url: `${baseUrl}/core/profile.py`,       path: path.join(baseDir, 'core', 'profile.py') }, // <- clave
+    { url: `${baseUrl}/config.py`,             path: path.join(baseDir, 'config.py') },
   ];
 
+  // helper simple de fetch con manejo de error
+  async function fetchText(url) {
+    const res = await fetchImpl(url);
+    if (!res.ok) throw new Error(`HTTP ${res.status} al descargar ${url}`);
+    return res.text();
+  }
+
   try {
+    // carpeta principal + subcarpeta core
     await fs.mkdir(path.join(baseDir, 'core'), { recursive: true });
 
+    // asegurar paquete Python: core/__init__.py
+    const initPath = path.join(baseDir, 'core', '__init__.py');
+    try { await fs.access(initPath); } catch { await fs.writeFile(initPath, ''); }
+
+    // descargar y escribir cada archivo
     for (const file of files) {
       console.log(`📥 Descargando ${file.url}...`);
-      const res = await fetchImpl(file.url);
-      if (!res.ok) throw new Error(`HTTP ${res.status} al descargar ${file.url}`);
-      const content = await res.text();
-      await fs.writeFile(file.path, content);
+      const content = await fetchText(file.url);
+      await fs.writeFile(file.path, content, 'utf8');
     }
 
     console.log('✅ Archivos Python descargados en:', baseDir);
     return { baseDir };
   } catch (error) {
     console.error('❌ Error descargando desde GitHub:', error);
-    // Fallback: verificar si ya existen localmente
-    const fallback = app.isPackaged
+
+    // Fallback: usar archivos locales si existen
+    const fallbackLauncher = app.isPackaged
       ? path.join(app.getPath('userData'), 'python-scripts', 'ron_launcher.py')
       : path.join(process.cwd(), 'python-scripts', 'ron_launcher.py');
 
     try {
-      await fs.access(fallback);
-      console.log('📁 Usando archivos locales como fallback en:', path.dirname(fallback));
-      return { baseDir: path.dirname(fallback) };
+      await fs.access(fallbackLauncher);
+      console.log('📁 Usando archivos locales como fallback en:', path.dirname(fallbackLauncher));
+      return { baseDir: path.dirname(fallbackLauncher) };
     } catch {
       throw new Error('No se pueden descargar archivos y no hay fallback local');
     }
@@ -172,12 +186,29 @@ async function sendCommandToRon(command) {
 
 }
 
+ipcMain.handle('auth:set-token', async (_evt, token) => {
+  AUTH_TOKEN = (token || '').trim() || null;
+  return { ok: true };
+});
+
+ipcMain.handle('auth:get-token', async () => {
+  return { ok: true, token: AUTH_TOKEN };
+});
+
+ipcMain.handle('auth:clear-token', async () => {
+  AUTH_TOKEN = null;
+  return { ok: true };
+});
+
+
+
+
 
 ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
   const q = (text || '').trim();
   if (!q) return { ok: false, text: 'Mensaje vacío' };
 
-  // 1) Resolver API base (como ya lo tenés)
+  // 1) Resolver base URL de la API
   const userData = app.getPath('userData');
   let apiBase = (process.env.RON_API_URL || '').trim();
   try {
@@ -190,12 +221,15 @@ ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
   const base = apiBase.replace(/\/+$/, '');
   const looksLikeUrl = /^https?:\/\/[^/]+/i.test(base);
 
-  // 2) HTTP → Railway pidiendo JSON con comandos (execute: true, return_json: true)
+  // 2) Si hay backend HTTP, usamos POST /ron con Bearer (si hay token)
   if (looksLikeUrl) {
     try {
       const res = await fetchImpl(`${base}/ron`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}), // <- INYECTA TOKEN
+        },
         body: JSON.stringify({ text: q, username, return_json: true, source: 'desktop' }),
       });
 
@@ -203,9 +237,8 @@ ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
       let data;
       try { data = JSON.parse(raw); } catch { data = { user_response: raw }; }
 
-      // --- NUEVO: si vienen commands, ejecutarlos en local vía socket 9999 ---
+      // Ejecutar comandos localmente si vinieron
       if (Array.isArray(data?.commands) && data.commands.length > 0) {
-        // Enviamos TODA la respuesta como JSON en EXEC:: para que el launcher ejecute
         try {
           const payload = JSON.stringify({ commands: data.commands });
           console.log('[ask-ron] reenviando commands al launcher:', data.commands);
@@ -216,6 +249,7 @@ ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
         }
       }
 
+      // Texto de respuesta
       const replyText =
         data?.user_response ??
         data?.text ??
@@ -223,13 +257,13 @@ ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
         (typeof data === 'string' ? data : '') ??
         '';
 
-      return { ok: res.ok, text: replyText || 'Sin respuesta' };
+      return { ok: res.ok, text: replyText || (res.ok ? 'Sin respuesta' : `Error ${res.status}`) };
     } catch (err) {
       console.warn('[ask-ron] fetch a Railway falló, uso fallback socket CHAT::', err?.message || err);
     }
   }
 
-  // 3) Fallback sin internet: pedir al launcher que haga el chat y ejecute local
+  // 3) Fallback sin internet: SOCKET al launcher (hará chat + ejecutará)
   try {
     const resp = await sendCommandToRon(`CHAT::${q}`);
     return { ok: true, text: resp || 'Sin respuesta' };
@@ -238,7 +272,6 @@ ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
     return { ok: false, text: 'No se pudo contactar al backend' };
   }
 });
-
 
 
 
@@ -266,13 +299,16 @@ ipcMain.handle('start-ron-247', async (_event, userData) => {
 
     ronPythonProcess = spawn('python', args, {
       stdio: ['pipe', 'pipe', 'pipe'],
+      cwd: baseDir,
       env: {
         ...process.env,
         PYTHONUTF8: '1',
         PYTHONIOENCODING: 'utf-8',
-        PYTHONUNBUFFERED: '1',  // <— refuerzo por si acaso
+        PYTHONUNBUFFERED: '1',
+        PYTHONPATH: `${baseDir}${path.delimiter}${path.join(baseDir, 'core')}`, // <- añadido
       },
     });
+
 
     // Errores al lanzar
     ronPythonProcess.on('error', (err) => {

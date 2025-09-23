@@ -1,42 +1,33 @@
+// src/components/chat.jsx
 import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/authcontext';
 import { ronAPI } from '../services/api';
 import './chat.css';
 
-// Quita líneas de log y devuelve solo el contenido "humano"
+// Limpia líneas de log para mostrar solo el contenido útil
 const sanitizeRonText = (raw = '') => {
   if (!raw || typeof raw !== 'string') return '';
-
-  // Cortamos por líneas, quitamos espacios
   const lines = raw.split(/\r?\n/).map(l => l.trim());
 
-  // Filtros de líneas de log típicas
-  const isLog = (l) => (
-    !l ||                            // vacía
-    l.startsWith('📁') ||            // "📁 Archivo de memoria..."
+  const isLog = (l) =>
+    !l ||
+    l.startsWith('📁') ||
     l.startsWith('[RON]') ||
     l.toLowerCase().startsWith('info:') ||
     l.toLowerCase().startsWith('debug:') ||
     l.toLowerCase().includes('archivo de memoria no encontrado') ||
     l.toLowerCase().includes('descargando') ||
     l.toLowerCase().includes('control server') ||
-    l.toLowerCase().includes('ron 24/7') || 
-    /^http(s)?:\/\//i.test(l)       // URLs de log/descarga, por si acaso
-  );
+    l.toLowerCase().includes('ron 24/7') ||
+    /^http(s)?:\/\//i.test(l);
 
-  // Nos quedamos con las líneas que no parecen log
   const content = lines.filter(l => !isLog(l));
-
-  // Si no queda nada, nos quedamos con la última línea no vacía del original
   if (content.length === 0) {
-    const last = lines.reverse().find(l => l && !isLog(l));
+    const last = [...lines].reverse().find(l => l && !isLog(l));
     return last || raw;
   }
-
-  // Devuelve el texto “limpio”
   return content.join('\n').trim();
 };
-
 
 const Chat = () => {
   const [messages, setMessages] = useState([]);
@@ -47,9 +38,7 @@ const Chat = () => {
 
   const { token, logout } = useAuth();
 
-  // Actualiza SOLO la burbuja del bot indicada.
-  // - Si text es vacío, NO pisa: deja la burbuja en pending.
-  // - Si opts.error es true, marca error y quita pending.
+  // Actualiza SOLO la burbuja del bot indicada
   const updateBotBubble = (botId, text, opts = {}) => {
     setMessages(prev =>
       prev.map(m => {
@@ -60,13 +49,12 @@ const Chat = () => {
         if (typeof text === 'string' && text.trim() !== '') {
           return { ...m, text, pending: false, error: false };
         }
-        // vacío: mantener pending (typing) y no pisar
         return { ...m, pending: true };
       })
     );
   };
 
-  // Fallback: trae el último mensaje de Ron desde el historial persistido
+  // Fallback: traer último ron desde historial
   const fetchLastRonFromHistory = async () => {
     try {
       const response = await ronAPI.getUserConversations(token);
@@ -80,23 +68,18 @@ const Chat = () => {
     }
   };
 
-  // helper: scroll al final
+  // Scroll al final
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
+  useEffect(() => { scrollToBottom(); }, [messages]);
 
-  useEffect(() => {
-    scrollToBottom();
-  }, [messages]);
-
-  // cargar historial inicial
+  // Cargar historial inicial
   useEffect(() => {
     const loadConversations = async () => {
       try {
         const response = await ronAPI.getUserConversations(token);
         const conversations = response.conversations || [];
-
-        // Intercalar user/ron y aplanar
         const formatted = conversations
           .map((conv, index) => ([
             {
@@ -113,25 +96,21 @@ const Chat = () => {
             }
           ]))
           .flat();
-
         setMessages(formatted);
       } catch (err) {
         console.error('Error cargando conversaciones:', err);
         setError('No se pudo cargar el historial de chat.');
       }
     };
-
     if (token) loadConversations();
   }, [token]);
 
-  // enviar mensaje
+  // Enviar mensaje
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!inputText.trim() || loading) return;
 
     const text = inputText.trim();
-
-    // agregar mensaje del usuario
     const userMessage = {
       id: `user-${crypto.randomUUID?.() || Date.now()}`,
       text,
@@ -144,7 +123,6 @@ const Chat = () => {
     setLoading(true);
     setError('');
 
-    // crea burbuja pendiente del bot
     const botId = `bot-${crypto.randomUUID?.() || Date.now()}`;
     setMessages(prev => [
       ...prev,
@@ -154,7 +132,7 @@ const Chat = () => {
     try {
       let ronText = '';
 
-      // Preferir Electron si está
+      // Preferir Electron si existe
       if (window?.electronAPI?.askRon) {
         const res = await window.electronAPI.askRon({ text });
         if (res?.ok) {
@@ -163,15 +141,13 @@ const Chat = () => {
             : (res?.ron ?? res?.reply ?? res?.user_response ?? res?.message ?? JSON.stringify(res.text ?? ''));
           ronText = sanitizeRonText(raw);
         } else {
-          // fallback HTTP
           const httpRes = await ronAPI.chatWithRon(text, token);
           if (httpRes?.error) throw new Error(httpRes.error);
           ronText = sanitizeRonText(
             typeof httpRes === 'string'
               ? httpRes
-              : (httpRes?.ron ?? httpRes?.reply ?? httpRes?.user_response ?? httpRes?.message ?? '')
+              : (httpRes?.reply ?? httpRes?.ron ?? httpRes?.user_response ?? httpRes?.message ?? '')
           );
-          if (httpRes?.shutdown) setTimeout(() => logout(), 2000);
         }
       } else {
         // Solo backend HTTP
@@ -180,16 +156,14 @@ const Chat = () => {
         ronText = sanitizeRonText(
           typeof httpRes === 'string'
             ? httpRes
-            : (httpRes?.ron ?? httpRes?.reply ?? httpRes?.user_response ?? httpRes?.message ?? '')
+            : (httpRes?.reply ?? httpRes?.ron ?? httpRes?.user_response ?? httpRes?.message ?? '')
         );
-        if (httpRes?.shutdown) setTimeout(() => logout(), 2000);
       }
 
-      // 1) intentar actualizar con lo recibido (sin pisar con vacío)
       const cleaned = sanitizeRonText(ronText);
       updateBotBubble(botId, cleaned);
 
-      // 2) si quedó vacío, hacer fallback al historial (1 o 2 reintentos cortos)
+      // Fallback si quedó vacío
       if (!cleaned || !cleaned.trim()) {
         await new Promise(r => setTimeout(r, 250));
         const fromHist1 = await fetchLastRonFromHistory();
@@ -198,19 +172,24 @@ const Chat = () => {
         } else {
           await new Promise(r => setTimeout(r, 400));
           const fromHist2 = await fetchLastRonFromHistory();
-          updateBotBubble(botId, fromHist2); // si sigue vacío, se mantiene pending
+          updateBotBubble(botId, fromHist2);
         }
       }
     } catch (err) {
       console.error('Error:', err);
-      updateBotBubble(botId, '', { error: true }); // marca SOLO esa burbuja
+      const msg = String(err?.message || '');
+      if (msg.includes('401') || msg.toLowerCase().includes('unauthorized') || msg.toLowerCase().includes('token')) {
+        // token inválido/expirado -> cerrar sesión
+        logout?.();
+      }
+      updateBotBubble(botId, '', { error: true });
       setError('Error al comunicarse con Ron. Intenta de nuevo.');
     } finally {
       setLoading(false);
     }
   };
 
-  // enviar con Enter (sin Shift)
+  // Enviar con Enter (sin Shift)
   const handleKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
@@ -257,8 +236,6 @@ const Chat = () => {
             </div>
           ))
         )}
-
-
         <div ref={messagesEndRef} />
       </div>
 

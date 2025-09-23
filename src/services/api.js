@@ -1,90 +1,105 @@
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'https://ron-app.up.railway.app';
-  
+// src/services/api.js
+const RAW_BASE = process.env.REACT_APP_API_URL || 'https://ron-app.up.railway.app';
+const API_BASE_URL = RAW_BASE.replace(/\/+$/, ''); // normaliza: sin barra al final
+
 class RonAPI {
   constructor() {
     this.baseURL = API_BASE_URL;
   }
 
   async request(endpoint, options = {}) {
-    const url = `${this.baseURL}${endpoint}`;
-    const config = {
+    const url = `${this.baseURL}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
+    const { method = 'GET', headers = {}, body } = options;
+
+    // Si body es objeto, serialízalo a JSON
+    const finalBody =
+      body === undefined
+        ? undefined
+        : (typeof body === 'string' ? body : JSON.stringify(body));
+
+    const res = await fetch(url, {
+      method,
       headers: {
         'Content-Type': 'application/json',
-        ...options.headers,
+        ...headers,
       },
-      ...options,
-    };
+      body: finalBody,
+    });
 
-    const response = await fetch(url, config);
-    const data = await response.json();
-    if (!response.ok) throw new Error(data.detail || 'Error en la petición');
-    return data;  
-  }  
-  
-  // Endpoints de autenticación  
-  async register(username, password, email) {  
-    return this.request('/auth/register', {  
-      method: 'POST',  
-      body: JSON.stringify({ username, password, email }),  
-    });  
-  }  
-  
-  async login(username, password) {  
-    return this.request('/auth/login', {  
-      method: 'POST',  
-      body: JSON.stringify({ username, password }),  
-    });  
-  }  
-  
-  async logout(token) {  
-    return this.request('/auth/logout', {  
-      method: 'POST',  
-      headers: {  
-        'Authorization': `Bearer ${token}`,  
-      },  
-    });  
-  }  
-  
-  // Endpoint principal de chat  
+    const text = await res.text();
+    let data;
+    try { data = text ? JSON.parse(text) : null; }
+    catch { data = text; }
+
+    if (!res.ok) {
+      const msg =
+        (data && (data.detail || data.error || data.message)) ||
+        (text || `HTTP ${res.status}`);
+      throw new Error(msg);
+    }
+    return data;
+  }
+
+  // --- Auth ---
+  async register(username, password, email) {
+    return this.request('/auth/register', {
+      method: 'POST',
+      body: { username, password, email },
+    });
+  }
+
+  async login(username, password) {
+    return this.request('/auth/login', {
+      method: 'POST',
+      body: { username, password },
+    });
+  }
+
+  async logout(token) {
+    return this.request('/auth/logout', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  }
+
+  // --- Chat principal ---
   async chatWithRon(text, token, username = 'default') {
+    // Enviamos ambos campos 'text' y 'message' para ser compatibles con cualquier backend.
     return this.request('/ron', {
       method: 'POST',
       headers: {
         ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
-      body: JSON.stringify({
+      body: {
         text,
+        message: text,         // <- compat si el backend esperaba 'message'
         username,
-        return_json: true,  // ← que el server devuelva { user_response, commands }
-        source: 'desktop',  // ← etiqueta para tu backend (si la usas)
-      }),
+        return_json: true,     // backend puede devolver { reply|user_response|commands }
+        source: 'desktop',
+      },
     });
   }
 
-  
-  async getUserConversations(token) {  
-    return this.request('/user/conversations', {  
-      method: 'GET',  
-      headers: {  
-        'Authorization': `Bearer ${token}`,  
-      },  
-    });  
-  }  
-  
-  // Endpoints de utilidad  
-  async healthCheck() {  
-    return this.request('/health');  
-  }  
-  
-  async getMemoryStatus(token) {  
-    return this.request('/memory-status', {  
-      method: 'GET',  
-      headers: {  
-        'Authorization': `Bearer ${token}`,  
-      },  
-    });  
-  }  
-}  
+  // --- Historial del usuario ---
+  async getUserConversations(token) {
+    return this.request('/user/conversations', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  }
+
+  // --- Utilidad ---
+  async healthCheck() {
+    return this.request('/health');
+  }
+
+  async getMemoryStatus(token) {
+    return this.request('/memory-status', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  }
+}
 
 export const ronAPI = new RonAPI();
 export default ronAPI;

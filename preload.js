@@ -1,44 +1,50 @@
+// preload.js
 const { contextBridge, ipcRenderer } = require('electron');
 
 contextBridge.exposeInMainWorld('electronAPI', {
-  // ——— Acciones 24/7 ———
-  startRon247: (userData) => ipcRenderer.invoke('start-ron-247', userData),
-  stopRon247: () => ipcRenderer.invoke('stop-ron-247'),
-  getRon247Status: () => ipcRenderer.invoke('get-ron-247-status'),
-  toggleRon247Listening: () => ipcRenderer.invoke('toggle-ron-247-listening'),
+  // ====== Auth / Config hacia proceso main ======
+  setAuthToken: (token) => ipcRenderer.invoke('auth:set-token', token ?? null),
+  setApiBase:   (url)   => ipcRenderer.invoke('auth:set-api-base', url ?? ''),
 
-  // ——— Grabación manual ———
-  startManualRecording: () => ipcRenderer.invoke('start-manual-recording'),
-  stopManualRecording: () => ipcRenderer.invoke('stop-manual-recording'),
+  // ====== Proxy HTTP genérico (alias y compat) ======
+  // Preferido por nuestros servicios
+  request:   (opts) => ipcRenderer.invoke('ron:req', opts),
+  // Compat con código antiguo que veía 'ronRequest'
+  ronRequest: (opts) => ipcRenderer.invoke('ron:req', opts),
 
-  // ——— Preguntar a Ron (socket si está activo, fallback si no) ———
+  // ====== Chat directo (usa el token guardado en main) ======
   askRon: (payload = {}) => {
+    // Opcionalmente podés pasar { text, username }, el token NO hace falta pasarlo aquí:
+    // el proceso main ya lo guarda con setAuthToken.
     const { text, username } = payload || {};
     return ipcRenderer.invoke('ask-ron', { text, username });
   },
 
-  // ——— Eventos con unsubscribe limpio y solo “data” ———
+  // ====== 24/7 ======
+  startRon247: (payload = {}) => ipcRenderer.invoke('start-ron-247', payload),
+  stopRon247:  () => ipcRenderer.invoke('stop-ron-247'),
+  getRon247Status: (payload = {}) => ipcRenderer.invoke('get-ron-247-status', payload),
+  toggleRon247Listening: (payload = {}) => ipcRenderer.invoke('toggle-ron-247-listening', payload),
+
+  // ====== Grabación manual ======
+  startManualRecording: () => ipcRenderer.invoke('start-manual-recording'),
+  stopManualRecording:  () => ipcRenderer.invoke('stop-manual-recording'),
+
+  // ====== Eventos (con unsubscribe limpio) ======
   onRon247StatusChange: (callback) => {
     if (typeof callback !== 'function') return () => {};
-    const handler = (_event, status) => callback(status);
+    const handler = (_e, status) => callback(status);
     ipcRenderer.on('ron-247-status-changed', handler);
-    // devolver función para desuscribirse
     return () => ipcRenderer.removeListener('ron-247-status-changed', handler);
   },
 
   onRon247Output: (callback) => {
     if (typeof callback !== 'function') return () => {};
-    const handler = (_event, output) => callback(output);
+    const handler = (_e, output) => callback(output);
     ipcRenderer.on('ron-247-output', handler);
-    // devolver función para desuscribirse
     return () => ipcRenderer.removeListener('ron-247-output', handler);
   },
 
-  // ——— Remoción manual si lo necesitas ———
-  removeAllListeners: (channel) => {
-    ipcRenderer.removeAllListeners(channel);
-  },
-
-  // ——— Proxy HTTP opcional ———
-  ronRequest: (opts) => ipcRenderer.invoke('ron:req', opts),
+  // ====== Limpieza manual opcional ======
+  removeAllListeners: (channel) => ipcRenderer.removeAllListeners(channel),
 });

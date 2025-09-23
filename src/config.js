@@ -4,4 +4,4 @@ export const API_URL =
   // CRA
   process.env.REACT_APP_RON_API_URL ||
   // Fallback (cámbialo por tu dominio real)
-  "https://TU-BACKEND-RON.example.com";
+  "https://";

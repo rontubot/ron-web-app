@@ -1,5 +1,5 @@
 // src/services/api.js
-const RAW_BASE = process.env.REACT_APP_API_URL || 'https://ron-app.up.railway.app';
+const RAW_BASE = process.env.REACT_APP_API_URL || 'https://ron-production.up.railway.app';
 const API_BASE_URL = RAW_BASE.replace(/\/+$/, ''); // normaliza: sin barra al final
 
 class RonAPI {
@@ -11,7 +11,7 @@ class RonAPI {
     const url = `${this.baseURL}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
     const { method = 'GET', headers = {}, body } = options;
 
-    // Si body es objeto, serialízalo a JSON
+    // Si body es objeto, serialízalo a JSON; si ya es string, respétalo
     const finalBody =
       body === undefined
         ? undefined
@@ -62,9 +62,17 @@ class RonAPI {
     });
   }
 
+  // Perfil del usuario autenticado
+  async me(token) {
+    return this.request('/user/profile', {
+      method: 'GET',
+      headers: { Authorization: `Bearer ${token}` },
+    });
+  }
+
   // --- Chat principal ---
   async chatWithRon(text, token, username = 'default') {
-    // Enviamos ambos campos 'text' y 'message' para ser compatibles con cualquier backend.
+    // Enviamos 'text' (unificado). El backend /ron ya debe aceptar text o message.
     return this.request('/ron', {
       method: 'POST',
       headers: {
@@ -72,9 +80,8 @@ class RonAPI {
       },
       body: {
         text,
-        message: text,         // <- compat si el backend esperaba 'message'
         username,
-        return_json: true,     // backend puede devolver { reply|user_response|commands }
+        return_json: true,     // backend puede devolver { user_response|ron|commands }
         source: 'desktop',
       },
     });
@@ -97,6 +104,30 @@ class RonAPI {
     return this.request('/memory-status', {
       method: 'GET',
       headers: { Authorization: `Bearer ${token}` },
+    });
+  }
+
+  // --- Fallbacks Ron 24/7 (modo web sin Electron) ---
+  async status247(token) {
+    return this.request('/ron247/status', {
+      method: 'GET',
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+    });
+  }
+
+  async start247(token) {
+    return this.request('/ron247/start', {
+      method: 'POST',
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: {},
+    });
+  }
+
+  async stop247(token) {
+    return this.request('/ron247/stop', {
+      method: 'POST',
+      headers: { ...(token ? { Authorization: `Bearer ${token}` } : {}) },
+      body: {},
     });
   }
 }

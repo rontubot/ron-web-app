@@ -18,8 +18,7 @@ const fetchImpl = global.fetch || (async (...args) => {
 });
 
 // (opcional) URL backend si luego usas el proxy IPC ron:req
-const API_URL = process.env.RON_API_URL || 'https://';
-
+const API_URL = (process.env.RON_API_URL || 'https://ron-production.up.railway.app').replace(/\/+$/, '');
 let AUTH_TOKEN = null;
 let mainWindow;
 let ronPythonProcess = null;
@@ -191,7 +190,7 @@ ipcMain.handle('auth:set-token', async (_evt, token) => {
   return { ok: true };
 });
 
-ipcMain.handle('auth:get-token', async () => {
+ipcMain.handle('auth:get-token', async () => { 
   return { ok: true, token: AUTH_TOKEN };
 });
 
@@ -217,7 +216,7 @@ ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
       apiBase = (cfg.RON_API_URL || '').trim();
     }
   } catch {}
-  if (!apiBase) apiBase = 'https://ron-production.up.railway.app';
+  if (!apiBase) apiBase = API_URL; // usa el normalizado de arriba
   const base = apiBase.replace(/\/+$/, '');
   const looksLikeUrl = /^https?:\/\/[^/]+/i.test(base);
 
@@ -305,7 +304,9 @@ ipcMain.handle('start-ron-247', async (_event, userData) => {
         PYTHONUTF8: '1',
         PYTHONIOENCODING: 'utf-8',
         PYTHONUNBUFFERED: '1',
-        PYTHONPATH: `${baseDir}${path.delimiter}${path.join(baseDir, 'core')}`, // <- añadido
+        PYTHONPATH: `${baseDir}${path.delimiter}${path.join(baseDir, 'core')}`,
+        RON_API_URL: API_URL,
+        RON_AUTH_TOKEN: AUTH_TOKEN || '',
       },
     });
 
@@ -383,15 +384,33 @@ ipcMain.handle('toggle-ron-247-listening', async () => {
     if (!ronPythonProcess) {
       return { success: false, message: 'Ron 24/7 no está ejecutándose' };
     }
-    const command = ron247Status === 'listening' ? 'STOP' : 'START';
-    await sendCommandToRon(command);
 
-    ron247Status = command === 'START' ? 'listening' : 'inactive';
+    const pausar = ron247Status === 'listening';
+    const primaryCmd = pausar ? 'PAUSE' : 'RESUME';
+
+    let ok = true;
+    try {
+      await sendCommandToRon(primaryCmd);
+    } catch (e) {
+      // Fallback a comandos antiguos solo si el launcher no soporta PAUSE/RESUME
+      const fallback = pausar ? 'STOP' : 'START';
+      try {
+        await sendCommandToRon(fallback);
+      } catch (err2) {
+        ok = false;
+      }
+    }
+
+    if (!ok) {
+      return { success: false, message: 'No se pudo cambiar el estado de escucha' };
+    }
+
+    ron247Status = pausar ? 'inactive' : 'listening';
     mainWindow?.webContents.send('ron-247-status-changed', ron247Status);
 
     return {
       success: true,
-      message: `Ron 24/7 ${command === 'START' ? 'activado' : 'desactivado'}`,
+      message: `Escucha ${pausar ? 'pausada' : 'activada'}`,
       status: ron247Status,
     };
   } catch (error) {
@@ -445,7 +464,7 @@ ipcMain.handle('get-ron-247-status', async () => {
   if (ronPythonProcess) {
     try {
       const socketStatus = await sendCommandToRon('STATUS');
-      ron247Status = socketStatus === 'ACTIVE' ? 'listening' : 'inactive';
+      ron247Status = /ACTIVE|LISTENING|READY/i.test(String(socketStatus)) ? 'listening' : 'inactive';
     } catch (error) {
       console.log('No se pudo verificar estado via socket:', error.message);
     }

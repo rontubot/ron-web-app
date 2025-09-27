@@ -216,31 +216,35 @@ ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
       apiBase = (cfg.RON_API_URL || '').trim();
     }
   } catch {}
-  if (!apiBase) apiBase = API_URL; // usa el normalizado de arriba
+  if (!apiBase) apiBase = 'https://ron-production.up.railway.app';
   const base = apiBase.replace(/\/+$/, '');
   const looksLikeUrl = /^https?:\/\/[^/]+/i.test(base);
 
-  // 2) Si hay backend HTTP, usamos POST /ron con Bearer (si hay token)
   if (looksLikeUrl) {
     try {
       const res = await fetchImpl(`${base}/ron`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}), // <- INYECTA TOKEN
+          ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),
         },
-        body: JSON.stringify({ text: q, username, return_json: true, source: 'desktop' }),
+        // **Clave**: enviar ambos campos
+        body: JSON.stringify({
+          text: q,
+          message: q,
+          username,
+          return_json: true,
+          source: 'desktop',
+        }),
       });
 
       const raw = await res.text();
       let data;
       try { data = JSON.parse(raw); } catch { data = { user_response: raw }; }
 
-      // Ejecutar comandos localmente si vinieron
       if (Array.isArray(data?.commands) && data.commands.length > 0) {
         try {
           const payload = JSON.stringify({ commands: data.commands });
-          console.log('[ask-ron] reenviando commands al launcher:', data.commands);
           await sendCommandToRon(`EXEC::${payload}`);
           mainWindow?.webContents.send('ron-247-output', '→ Comandos del chat ejecutados localmente\n');
         } catch (e) {
@@ -248,11 +252,13 @@ ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
         }
       }
 
-      // Texto de respuesta
       const replyText =
         data?.user_response ??
+        data?.ron ??
+        data?.reply ??
         data?.text ??
         data?.message ??
+        data?.message_text ??
         (typeof data === 'string' ? data : '') ??
         '';
 
@@ -262,7 +268,6 @@ ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
     }
   }
 
-  // 3) Fallback sin internet: SOCKET al launcher (hará chat + ejecutará)
   try {
     const resp = await sendCommandToRon(`CHAT::${q}`);
     return { ok: true, text: resp || 'Sin respuesta' };

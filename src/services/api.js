@@ -11,7 +11,6 @@ class RonAPI {
     const url = `${this.baseURL}${endpoint.startsWith('/') ? '' : '/'}${endpoint}`;
     const { method = 'GET', headers = {}, body } = options;
 
-    // Si body es objeto, serialízalo a JSON; si ya es string, respétalo
     const finalBody =
       body === undefined
         ? undefined
@@ -72,7 +71,7 @@ class RonAPI {
 
   // --- Chat principal ---
   async chatWithRon(text, token, username = 'default') {
-    // Enviamos 'text' (unificado). El backend /ron ya debe aceptar text o message.
+    // **Clave:** mandamos text Y message para compatibilidad con el backend actual
     return this.request('/ron', {
       method: 'POST',
       headers: {
@@ -80,8 +79,9 @@ class RonAPI {
       },
       body: {
         text,
+        message: text,        // <- compat
         username,
-        return_json: true,     // backend puede devolver { user_response|ron|commands }
+        return_json: true,
         source: 'desktop',
       },
     });

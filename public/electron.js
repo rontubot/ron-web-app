@@ -333,6 +333,17 @@ ipcMain.handle('start-ron-247', async (_event, userData) => {
       if (output.includes('Control server listening')) {
         ron247Status = 'listening';
         mainWindow?.webContents.send('ron-247-status-changed', 'listening');
+    // Activar automáticamente la escucha  
+    setTimeout(async () => {  
+      try {  
+        await sendCommandToRon('START');  
+        console.log('Escucha activada automáticamente');  
+      } catch (error) {  
+        console.error('Error activando escucha automáticamente:', error);  
+      }  
+    }, 1000); // Pequeño delay para asegurar que el socket esté listo  
+
+             
       }
       mainWindow?.webContents.send('ron-247-output', output);
     });
@@ -384,45 +395,6 @@ ipcMain.handle('stop-ron-247', async () => {
   }
 });
 
-ipcMain.handle('toggle-ron-247-listening', async () => {
-  try {
-    if (!ronPythonProcess) {
-      return { success: false, message: 'Ron 24/7 no está ejecutándose' };
-    }
-
-    const pausar = ron247Status === 'listening';
-    const primaryCmd = pausar ? 'PAUSE' : 'RESUME';
-
-    let ok = true;
-    try {
-      await sendCommandToRon(primaryCmd);
-    } catch (e) {
-      // Fallback a comandos antiguos solo si el launcher no soporta PAUSE/RESUME
-      const fallback = pausar ? 'STOP' : 'START';
-      try {
-        await sendCommandToRon(fallback);
-      } catch (err2) {
-        ok = false;
-      }
-    }
-
-    if (!ok) {
-      return { success: false, message: 'No se pudo cambiar el estado de escucha' };
-    }
-
-    ron247Status = pausar ? 'inactive' : 'listening';
-    mainWindow?.webContents.send('ron-247-status-changed', ron247Status);
-
-    return {
-      success: true,
-      message: `Escucha ${pausar ? 'pausada' : 'activada'}`,
-      status: ron247Status,
-    };
-  } catch (error) {
-    console.error('Error toggling Ron 24/7:', error);
-    return { success: false, message: error.message };
-  }
-});
 
 
 ipcMain.handle('start-manual-recording', async () => {  

@@ -113,76 +113,65 @@ const Ron24_7 = () => {
 
   useEffect(() => () => cleanupAudio(), []);
 
-  const startManualRecording = async () => {
-    try {
-      setRecordingStatus('recording');
-      setIsRecording(true);
-
-      const audioSetup = await setupAudioAnalysis();
-      if (audioSetup && canvasRef.current) {
-        drawSpectrum(audioSetup.analyserNode, canvasRef.current);
-      }
-
-      const result = await window.electronAPI.startManualRecording();
-      if (result.success) {
-        addLog('Grabación manual iniciada', 'success');
-      } else {
-        addLog(`Error: ${result.message}`, 'error');
-        setIsRecording(false);
-        setRecordingStatus('idle');
-        cleanupAudio();
-      }
-    } catch {
-      addLog('Error al iniciar grabación manual', 'error');
-      setIsRecording(false);
-      setRecordingStatus('idle');
-      cleanupAudio();
-    }
+  const startManualRecording = async () => {  
+    try {  
+      setRecordingStatus('recording');  
+      setIsRecording(true);  
+    
+      // Limpiar cualquier audio residual antes de iniciar  
+      addLog('Iniciando grabación limpia...', 'info');  
+    
+      const audioSetup = await setupAudioAnalysis();  
+      if (audioSetup && canvasRef.current) {  
+        drawSpectrum(audioSetup.analyserNode, canvasRef.current);  
+      }  
+    
+      const result = await window.electronAPI.startManualRecording();  
+      if (result.success) {  
+        addLog('Grabación manual iniciada', 'success');  
+      } else {  
+        addLog(`Error: ${result.message}`, 'error');  
+        setIsRecording(false);  
+        setRecordingStatus('idle');  
+        cleanupAudio();  
+      }  
+    } catch {  
+      addLog('Error al iniciar grabación manual', 'error');  
+      setIsRecording(false);  
+      setRecordingStatus('idle');  
+      cleanupAudio();  
+    }  
   };
 
-  const stopManualRecording = async () => {
-    try {
-      setRecordingStatus('processing');
-      cleanupAudio();
 
-      const result = await window.electronAPI.stopManualRecording();
-      if (result.success) {
-        addLog('Grabación manual procesada', 'success');
-      } else {
-        addLog(`Error: ${result.message}`, 'error');
-      }
-    } catch {
-      addLog('Error al procesar grabación manual', 'error');
-    } finally {
-      setIsRecording(false);
-      setRecordingStatus('idle');
-    }
+  const stopManualRecording = async () => {  
+    try {  
+      setRecordingStatus('processing');  
+      cleanupAudio();  
+    
+      // Delay para permitir que el último fragmento de audio sea procesado  
+      addLog('Finalizando grabación...', 'info');  
+      await new Promise(resolve => setTimeout(resolve, 1500)); // 1.5 segundos de delay  
+    
+      const result = await window.electronAPI.stopManualRecording();  
+      if (result.success) {  
+        addLog('Grabación manual procesada', 'success');  
+      } else {  
+        addLog(`Error: ${result.message}`, 'error');  
+      }  
+    } catch {  
+      addLog('Error al procesar grabación manual', 'error');  
+    } finally {  
+      setIsRecording(false);  
+      setRecordingStatus('idle');  
+    }  
   };
-
   const handleRecordingToggle = () => {
     if (isRecording) stopManualRecording();
     else startManualRecording();
     };
 
   // --- Ron 24/7 ---
-  const toggleListening = async () => {
-    try {
-      let result;
-      if (window?.electronAPI?.toggleRon247Listening) {
-        result = await window.electronAPI.toggleRon247Listening({ token }); // token
-      } else {
-        result = { success: false, message: 'Toggle de escucha no disponible (modo web).' };
-      }
-      if (result.success) {
-        setStatus((result.status || '').toLowerCase());
-        addLog(result.message, 'success');
-      } else {
-        addLog(`Error: ${result.message}`, 'error');
-      }
-    } catch {
-      addLog('Error al controlar la escucha', 'error');
-    }
-  };
 
   const checkRon247Status = useCallback(async () => {
     try {
@@ -357,13 +346,6 @@ const Ron24_7 = () => {
             {isActive ? '🔴 Desactivar' : '🟢 Activar'}
           </button>
 
-          <button
-            className="listening-toggle-button"
-            onClick={toggleListening}
-            disabled={!isActive}
-          >
-            {status === 'listening' ? '🔇 Pausar Escucha' : '🎤 Activar Escucha'}
-          </button>
 
           <button
             className={`manual-recording-button ${recordingStatus}`}

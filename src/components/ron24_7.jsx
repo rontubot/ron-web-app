@@ -402,7 +402,6 @@ const Ron24_7 = () => {
           <li><strong>Despertar:</strong> Di "Ron" para iniciar una conversación</li>
           <li><strong>Comandos:</strong> Usa comandos de voz como "abre YouTube", "diagnostica el sistema"</li>
           <li><strong>Despedirse:</strong> Di "hasta luego" para terminar la conversación</li>
-          <li><strong>Control de Escucha:</strong> Usa "Pausar/Activar Escucha" para controlar solo el audio sin detener el proceso</li>
           <li><strong>Desactivar:</strong> Haz clic en "Desactivar" para detener completamente</li>
         </ul>
       </div>

@@ -195,7 +195,8 @@ app.post('/ron', authenticateToken, async (req, res) => {
   
     res.json({  
       ron: response.data.ron,  
-      shutdown: response.data.shutdown || false  
+      shutdown: response.data.shutdown || false,
+      commands: response.data.commands || []   
     });  
   
   } catch (error) {  

@@ -4,29 +4,33 @@ import { useAuth } from '../context/authcontext';
 import { ronAPI } from '../services/api';
 import './chat.css';
 
-// Limpia líneas de log para mostrar solo el contenido útil
-const sanitizeRonText = (raw = '') => {
-  if (!raw || typeof raw !== 'string') return '';
-  const lines = raw.split(/\r?\n/).map(l => l.trim());
-
-  const isLog = (l) =>
-    !l ||
-    l.startsWith('📁') ||
-    l.startsWith('[RON]') ||
-    l.toLowerCase().startsWith('info:') ||
-    l.toLowerCase().startsWith('debug:') ||
-    l.toLowerCase().includes('archivo de memoria no encontrado') ||
-    l.toLowerCase().includes('descargando') ||
-    l.toLowerCase().includes('control server') ||
-    l.toLowerCase().includes('ron 24/7') ||
-    /^http(s)?:\/\//i.test(l);
-
-  const content = lines.filter(l => !isLog(l));
-  if (content.length === 0) {
-    const last = [...lines].reverse().find(l => l && !isLog(l));
-    return last || raw;
-  }
-  return content.join('\n').trim();
+// Limpia líneas de log para mostrar solo el contenido útil  
+const sanitizeRonText = (raw = '') => {  
+  if (!raw || typeof raw !== 'string') return '';  
+    
+  // NUEVO: Convertir \n literales en saltos de línea reales  
+  let text = raw.replace(/\\n/g, '\n');  
+    
+  const lines = text.split(/\r?\n/).map(l => l.trim());  
+  
+  const isLog = (l) =>  
+    !l ||  
+    l.startsWith('📁') ||  
+    l.startsWith('[RON]') ||  
+    l.toLowerCase().startsWith('info:') ||  
+    l.toLowerCase().startsWith('debug:') ||  
+    l.toLowerCase().includes('archivo de memoria no encontrado') ||  
+    l.toLowerCase().includes('descargando') ||  
+    l.toLowerCase().includes('control server') ||  
+    l.toLowerCase().includes('ron 24/7') ||  
+    /^http(s)?:\/\//i.test(l);  
+  
+  const content = lines.filter(l => !isLog(l));  
+  if (content.length === 0) {  
+    const last = [...lines].reverse().find(l => l && !isLog(l));  
+    return last || raw;  
+  }  
+  return content.join('\n').trim();  
 };
 
 const Chat = () => {
@@ -223,7 +227,7 @@ const Chat = () => {
                   ) : message.error ? (
                     'Sin respuesta'
                   ) : (
-                    message.text
+                    <div style={{ whiteSpace: 'pre-wrap' }}>{message.text}</div>
                   )}
                 </div>
                 <div className="message-time">

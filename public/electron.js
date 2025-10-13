@@ -44,58 +44,125 @@ function getPreloadPath() {
 }   
   
 // --------- Descarga de scripts Python a una carpeta writable ----------  
-async function downloadPythonFiles() {  
-  const baseUrl = 'https://raw.githubusercontent.com/rontubot/Ron/main';  
-  const baseDir = app.isPackaged  
-    ? path.join(app.getPath('userData'), 'python-scripts')  
-    : path.join(process.cwd(), 'python-scripts');  
-  
-  const files = [  
-    { url: `${baseUrl}/local/ron_launcher.py`, path: path.join(baseDir, 'ron_launcher.py') },  
-    { url: `${baseUrl}/core/assistant.py`,     path: path.join(baseDir, 'core', 'assistant.py') },  
-    { url: `${baseUrl}/core/memory.py`,        path: path.join(baseDir, 'core', 'memory.py') },  
-    { url: `${baseUrl}/core/commands.py`,      path: path.join(baseDir, 'core', 'commands.py') },  
-    { url: `${baseUrl}/core/profile.py`,       path: path.join(baseDir, 'core', 'profile.py') },  
-    { url: `${baseUrl}/config.py`,             path: path.join(baseDir, 'config.py') },  
-  ];  
-  
-  async function fetchText(url) {  
-    const res = await fetchImpl(url);  
-    if (!res.ok) throw new Error(`HTTP ${res.status} al descargar ${url}`);  
-    return res.text();  
-  }  
-  
+async function downloadPythonFiles() {    
+  const baseUrl = 'https://raw.githubusercontent.com/rontubot/Ron/main';    
+  const baseDir = app.isPackaged    
+    ? path.join(app.getPath('userData'), 'python-scripts')    
+    : path.join(process.cwd(), 'python-scripts');    
+    
+  // NUEVO: Verificar si las dependencias ya están instaladas  
+  const depsInstalledMarker = path.join(baseDir, '.deps_installed');  
+  let depsAlreadyInstalled = false;  
   try {  
-    await fs.mkdir(path.join(baseDir, 'core'), { recursive: true });  
-  
-    const initPath = path.join(baseDir, 'core', '__init__.py');  
-    try { await fs.access(initPath); } catch { await fs.writeFile(initPath, ''); }  
-  
-    for (const file of files) {  
-      console.log(`📥 Descargando ${file.url}...`);  
-      const content = await fetchText(file.url);  
-      await fs.writeFile(file.path, content, 'utf8');  
-    }  
-  
-    console.log('✅ Archivos Python descargados en:', baseDir);  
-    return { baseDir };  
-  } catch (error) {  
-    console.error('❌ Error descargando desde GitHub:', error);  
-  
-    const fallbackLauncher = app.isPackaged  
-      ? path.join(app.getPath('userData'), 'python-scripts', 'ron_launcher.py')  
-      : path.join(process.cwd(), 'python-scripts', 'ron_launcher.py');  
-  
-    try {  
-      await fs.access(fallbackLauncher);  
-      console.log('📁 Usando archivos locales como fallback en:', path.dirname(fallbackLauncher));  
-      return { baseDir: path.dirname(fallbackLauncher) };  
-    } catch {  
-      throw new Error('No se pueden descargar archivos y no hay fallback local');  
-    }  
+    await fs.access(depsInstalledMarker);  
+    depsAlreadyInstalled = true;  
+    console.log('✅ Dependencias ya instaladas, saltando instalación');  
+  } catch {  
+    console.log('📦 Primera instalación de dependencias');  
   }  
-}  
   
+  const files = [    
+    { url: `${baseUrl}/local/ron_launcher.py`, path: path.join(baseDir, 'ron_launcher.py') },    
+    { url: `${baseUrl}/core/assistant.py`,     path: path.join(baseDir, 'core', 'assistant.py') },    
+    { url: `${baseUrl}/core/memory.py`,        path: path.join(baseDir, 'core', 'memory.py') },    
+    { url: `${baseUrl}/core/commands.py`,      path: path.join(baseDir, 'core', 'commands.py') },    
+    { url: `${baseUrl}/core/profile.py`,       path: path.join(baseDir, 'core', 'profile.py') },    
+    { url: `${baseUrl}/config.py`,             path: path.join(baseDir, 'config.py') },    
+    { url: `${baseUrl}/core/autonomous.py`,    path: path.join(baseDir, 'core', 'autonomous.py') },  
+  ];    
+    
+  async function fetchText(url) {    
+    const res = await fetchImpl(url);    
+    if (!res.ok) throw new Error(`HTTP ${res.status} al descargar ${url}`);    
+    return res.text();    
+  }    
+    
+  try {  
+    // Notificar inicio de descarga  
+    mainWindow?.webContents.send('download-progress', {  
+      stage: 'downloading',  
+      message: 'Descargando archivos de Ron desde GitHub...'  
+    });  
+  
+    await fs.mkdir(path.join(baseDir, 'core'), { recursive: true });    
+    
+    const initPath = path.join(baseDir, 'core', '__init__.py');    
+    try { await fs.access(initPath); } catch { await fs.writeFile(initPath, ''); }    
+    
+    for (const file of files) {    
+      console.log(`📥 Descargando ${file.url}...`);    
+      const content = await fetchText(file.url);    
+      await fs.writeFile(file.path, content, 'utf8');    
+    }    
+    
+    console.log('✅ Archivos Python descargados en:', baseDir);  
+      
+    // Solo instalar dependencias si no están instaladas  
+    if (!depsAlreadyInstalled) {  
+      try {  
+        // Notificar inicio de instalación  
+        mainWindow?.webContents.send('download-progress', {  
+          stage: 'installing',  
+          message: 'Instalando dependencias Python (primera vez)...'  
+        });  
+  
+        console.log('📦 Descargando requirements.txt...');  
+        const reqUrl = `${baseUrl}/requirements.txt`;  
+        const reqContent = await fetchText(reqUrl);  
+        const reqPath = path.join(baseDir, 'requirements.txt');  
+        await fs.writeFile(reqPath, reqContent, 'utf8');  
+          
+        console.log('📦 Instalando dependencias Python...');  
+        const pipProcess = spawn('python', ['-m', 'pip', 'install', '--user', '-r', reqPath], {  
+          stdio: 'inherit'  
+        });  
+          
+        await new Promise((resolve, reject) => {  
+          pipProcess.on('close', async (code) => {  
+            if (code === 0) {  
+              console.log('✅ Dependencias Python instaladas correctamente');  
+              // Crear archivo marcador  
+              await fs.writeFile(depsInstalledMarker, new Date().toISOString(), 'utf8');  
+              resolve();  
+            } else {  
+              console.warn('⚠️ Algunas dependencias no se pudieron instalar (código:', code, ')');  
+              resolve(); // No fallar si pip falla  
+            }  
+          });  
+          pipProcess.on('error', (err) => {  
+            console.error('❌ Error instalando dependencias:', err);  
+            resolve(); // Continuar aunque falle  
+          });  
+        });  
+      } catch (error) {  
+        console.warn('⚠️ No se pudieron instalar dependencias automáticamente:', error);  
+      }  
+    }  
+  
+    // Notificar completado  
+    mainWindow?.webContents.send('download-progress', {  
+      stage: 'complete',  
+      message: 'Archivos listos'  
+    });  
+      
+    return { baseDir };    
+  } catch (error) {    
+    console.error('❌ Error descargando desde GitHub:', error);    
+    
+    const fallbackLauncher = app.isPackaged    
+      ? path.join(app.getPath('userData'), 'python-scripts', 'ron_launcher.py')    
+      : path.join(process.cwd(), 'python-scripts', 'ron_launcher.py');    
+    
+    try {    
+      await fs.access(fallbackLauncher);    
+      console.log('📁 Usando archivos locales como fallback en:', path.dirname(fallbackLauncher));    
+      return { baseDir: path.dirname(fallbackLauncher) };    
+    } catch {    
+      throw new Error('No se pueden descargar archivos y no hay fallback local');    
+    }    
+  }    
+}
+
 // --------- Ventana principal ----------  
 function createWindow() {  
   const preloadPath = getPreloadPath();  
@@ -265,35 +332,90 @@ ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
         data = { user_response: raw };
       }
 
-      // Si hay comandos Y Ron 24/7 está activo, ejecutarlos localmente
-      if (Array.isArray(data?.commands) && data.commands.length > 0) {
-        console.log(`[ask-ron] Recibidos ${data.commands.length} comandos desde Railway`);
-
-        if (!ronPythonProcess) {
-          console.warn('[ask-ron] Ron 24/7 no está activo, no se pueden ejecutar comandos');
-          mainWindow?.webContents.send('ron-247-output',
-            '⚠️ Ron 24/7 no está activo. Inicia Ron 24/7 para ejecutar comandos localmente.\n'
-          );
-        } else {
-          try {
-            const payload = JSON.stringify({ commands: data.commands });
-            console.log('[ask-ron] Enviando comandos al socket:', payload);
-
-            const socketResponse = await sendCommandToRon(`EXEC::${payload}`);
-            console.log('[ask-ron] Respuesta del socket:', socketResponse);
-
-            mainWindow?.webContents.send('ron-247-output',
-              `✅ ${data.commands.length} comando(s) ejecutado(s) localmente\n`
-            );
-          } catch (e) {
-            console.error('[ask-ron] Error ejecutando comandos vía socket:', e);
-            mainWindow?.webContents.send('ron-247-output',
-              '❌ Error ejecutando comandos: Ron 24/7 no responde. Verifica que esté activo.\n'
-            );
-          }
-        }
-      } else {
-        console.log('[ask-ron] No hay comandos para ejecutar');
+      // Si hay comandos Y Ron 24/7 está activo, ejecutarlos localmente  
+      if (Array.isArray(data?.commands) && data.commands.length > 0) {  
+        console.log(`[ask-ron] Recibidos ${data.commands.length} comandos desde Railway`);  
+        
+        if (!ronPythonProcess) {  
+          console.warn('[ask-ron] Ron 24/7 no está activo, no se pueden ejecutar comandos');  
+          mainWindow?.webContents.send('ron-247-output',  
+            '⚠️ Ron 24/7 no está activo. Inicia Ron 24/7 para ejecutar comandos localmente.\n'  
+          );  
+        } else {  
+          try {  
+            // Procesar cada comandos  
+            for (const cmd of data.commands) {  
+              // CASO ESPECIAL: Plan autónomo  
+              if (cmd.action === 'execute_autonomous_plan') {  
+                const plan = cmd.params?.plan;  
+                if (plan && plan.steps) {  
+                  console.log(`[ask-ron] Ejecutando plan autónomo: ${plan.task}`);  
+                    
+                  // Convertir plan a formato de comandos ejecutables  
+                  const execPayload = {  
+                    commands: plan.steps.map(step => ({  
+                      action: 'execute_windows_command',  
+                      params: {  
+                        type: step.type || 'cmd',  
+                        command: step.command,  
+                        description: step.description || 'Comando del sistema',  
+                        timeout: step.timeout || 30  
+                      }  
+                    }))  
+                  };  
+                    
+                  // Enviar al socket EXEC::  
+                  const socketResponse = await sendCommandToRon(`EXEC::${JSON.stringify(execPayload)}`);  
+                  console.log('[ask-ron] Respuesta del plan autónomo:', socketResponse);  
+                    
+                  mainWindow?.webContents.send('ron-247-output',  
+                    `✅ Plan autónomo ejecutado: ${plan.steps.length} paso(s)\n`  
+                  );  
+                }  
+              }   
+              // CASO ESPECIAL: Comando de Windows directo  
+              else if (cmd.type && ['cmd', 'powershell', 'python'].includes(cmd.type)) {  
+                console.log(`[ask-ron] Comando de Windows directo: ${cmd.type}`);  
+                  
+                const execPayload = {  
+                  commands: [{  
+                    action: 'execute_windows_command',  
+                    params: {  
+                      type: cmd.type,  
+                      command: cmd.command,  
+                      description: `Comando ${cmd.type}`,  
+                      safe: cmd.safe !== false  
+                    }  
+                  }]  
+                };  
+                  
+                const socketResponse = await sendCommandToRon(`EXEC::${JSON.stringify(execPayload)}`);  
+                console.log('[ask-ron] Respuesta del comando Windows:', socketResponse);  
+                  
+                mainWindow?.webContents.send('ron-247-output',  
+                  `✅ Comando ${cmd.type} ejecutado\n`  
+                );  
+              }  
+              // COMANDOS BÁSICOS (existentes)  
+              else if (cmd.action) {  
+                const execPayload = { commands: [cmd] };  
+                const socketResponse = await sendCommandToRon(`EXEC::${JSON.stringify(execPayload)}`);  
+                console.log('[ask-ron] Respuesta del comando básico:', socketResponse);  
+              }  
+            }  
+              
+            mainWindow?.webContents.send('ron-247-output',  
+              `✅ ${data.commands.length} comando(s) procesado(s)\n`  
+            );  
+          } catch (e) {  
+            console.error('[ask-ron] Error ejecutando comandos vía socket:', e);  
+            mainWindow?.webContents.send('ron-247-output',  
+              '❌ Error ejecutando comandos: Ron 24/7 no responde. Verifica que esté activo.\n'  
+            );  
+          }  
+        }  
+      } else {  
+        console.log('[ask-ron] No hay comandos para ejecutar');  
       }
 
       const replyText =
@@ -330,93 +452,101 @@ ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
 });
 
   
-// Handler para iniciar Ron 24/7  
-ipcMain.handle('start-ron-247', async (_event, userData) => {  
-  try {  
-    if (ronPythonProcess) {  
-      return { success: false, message: 'Ron 24/7 ya está ejecutándose' };  
-    }  
-  
-    console.log('🔄 Descargando/validando scripts Python...');  
-    const { baseDir } = await downloadPythonFiles();  
-    const pythonScriptPath = path.join(baseDir, 'ron_launcher.py');  
-  
-    // Lanzar Python con UTF-8 forzado (Windows safe)  
-    const args = [  
-      '-u',             // salida sin buffer  
-      '-X', 'utf8',  
-      pythonScriptPath,  
-      '--username', userData?.username || '',  
-      '--control-port', '9999',  
-    ];  
-    console.log('[RON] launching python:', 'python', args);  
-  
-    ronPythonProcess = spawn('python', args, {  
-      stdio: ['pipe', 'pipe', 'pipe'],  
-      cwd: baseDir,  
-      env: {  
-        ...process.env,  
-        PYTHONUTF8: '1',  
-        PYTHONIOENCODING: 'utf-8',  
-        PYTHONUNBUFFERED: '1',  
-        PYTHONPATH: `${baseDir}${path.delimiter}${path.join(baseDir, 'core')}`,  
-        RON_API_URL: API_URL,  
-        RON_AUTH_TOKEN: AUTH_TOKEN || '',  
-      },  
-    });  
-  
-    // Errores al lanzar  
-    ronPythonProcess.on('error', (err) => {  
-      console.error('[RON] error al lanzar Python:', err);  
-      ron247Status = 'inactive';  
-      mainWindow?.webContents.send('ron-247-status-changed', 'inactive');  
-    });  
-  
-    ron247Status = 'starting';  
-  
-    // Salida estándar  
-    ronPythonProcess.stdout.on('data', (data) => {  
-      const output = data.toString();  
-      console.log('Ron 24/7 output:', output);  
-  
-      if (output.includes('Control server listening')) {  
-        ron247Status = 'listening';  
-        mainWindow?.webContents.send('ron-247-status-changed', 'listening');  
-        // Activar automáticamente la escucha    
-        setTimeout(async () => {    
-          try {    
-            await sendCommandToRon('START');    
-            console.log('Escucha activada automáticamente');    
-          } catch (error) {    
-            console.error('Error activando escucha automáticamente:', error);    
-          }    
-        }, 1000); // Pequeño delay para asegurar que el socket esté listo  
-      }  
-      mainWindow?.webContents.send('ron-247-output', output);  
-    });  
-  
-    // Errores de Python (stderr)  
-    ronPythonProcess.stderr.on('data', (data) => {  
-      console.error('Ron 24/7 error:', data.toString());  
-    });  
-  
-    // Fin del proceso  
-    ronPythonProcess.on('close', (code) => {  
-      console.log(`Ron 24/7 process exited with code ${code}`);  
-      ronPythonProcess = null;  
-      ron247Status = 'inactive';  
-      mainWindow?.webContents.send('ron-247-status-changed', 'inactive');  
-    });  
-  
-    // pequeño delay para dar tiempo a iniciar  
-    await new Promise((r) => setTimeout(r, 3000));  
-  
-    return { success: true, message: 'Ron 24/7 iniciado correctamente con archivos actualizados' };  
-  } catch (error) {  
-    console.error('Error starting Ron 24/7:', error);  
-    return { success: false, message: error.message };  
-  }  
-});  
+// Handler para iniciar Ron 24/7    
+ipcMain.handle('start-ron-247', async (_event, userData) => {    
+  try {    
+    if (ronPythonProcess) {    
+      return { success: false, message: 'Ron 24/7 ya está ejecutándose' };    
+    }    
+    
+    console.log('🔄 Descargando/validando scripts Python...');    
+    const { baseDir } = await downloadPythonFiles();    
+    const pythonScriptPath = path.join(baseDir, 'ron_launcher.py');    
+    
+    // NUEVO: Determinar ruta de bin/ según si está empaquetado o en desarrollo  
+    const binPath = app.isPackaged  
+      ? path.join(process.resourcesPath, 'bin')  
+      : path.join(process.cwd(), 'bin');  
+      
+    console.log('[RON] bin path:', binPath);  
+    
+    // Lanzar Python con UTF-8 forzado (Windows safe)    
+    const args = [    
+      '-u',             // salida sin buffer    
+      '-X', 'utf8',    
+      pythonScriptPath,    
+      '--username', userData?.username || '',    
+      '--control-port', '9999',    
+    ];    
+    console.log('[RON] launching python:', 'python', args);    
+    
+    ronPythonProcess = spawn('python', args, {    
+      stdio: ['pipe', 'pipe', 'pipe'],    
+      cwd: baseDir,    
+      env: {    
+        ...process.env,    
+        PATH: `${binPath}${path.delimiter}${process.env.PATH}`,  // NUEVO: agregar bin/ al PATH  
+        PYTHONUTF8: '1',    
+        PYTHONIOENCODING: 'utf-8',    
+        PYTHONUNBUFFERED: '1',    
+        PYTHONPATH: `${baseDir}${path.delimiter}${path.join(baseDir, 'core')}`,    
+        RON_API_URL: API_URL,    
+        RON_AUTH_TOKEN: AUTH_TOKEN || '',    
+      },    
+    });    
+    
+    // Errores al lanzar    
+    ronPythonProcess.on('error', (err) => {    
+      console.error('[RON] error al lanzar Python:', err);    
+      ron247Status = 'inactive';    
+      mainWindow?.webContents.send('ron-247-status-changed', 'inactive');    
+    });    
+    
+    ron247Status = 'starting';    
+    
+    // Salida estándar    
+    ronPythonProcess.stdout.on('data', (data) => {    
+      const output = data.toString();    
+      console.log('Ron 24/7 output:', output);    
+    
+      if (output.includes('Control server listening')) {    
+        ron247Status = 'listening';    
+        mainWindow?.webContents.send('ron-247-status-changed', 'listening');    
+        // Activar automáticamente la escucha      
+        setTimeout(async () => {      
+          try {      
+            await sendCommandToRon('START');      
+            console.log('Escucha activada automáticamente');      
+          } catch (error) {      
+            console.error('Error activando escucha automáticamente:', error);      
+          }      
+        }, 1000); // Pequeño delay para asegurar que el socket esté listo    
+      }    
+      mainWindow?.webContents.send('ron-247-output', output);    
+    });    
+    
+    // Errores de Python (stderr)    
+    ronPythonProcess.stderr.on('data', (data) => {    
+      console.error('Ron 24/7 error:', data.toString());    
+    });    
+    
+    // Fin del proceso    
+    ronPythonProcess.on('close', (code) => {    
+      console.log(`Ron 24/7 process exited with code ${code}`);    
+      ronPythonProcess = null;    
+      ron247Status = 'inactive';    
+      mainWindow?.webContents.send('ron-247-status-changed', 'inactive');    
+    });    
+    
+    // pequeño delay para dar tiempo a iniciar    
+    await new Promise((r) => setTimeout(r, 3000));    
+    
+    return { success: true, message: 'Ron 24/7 iniciado correctamente con archivos actualizados' };    
+  } catch (error) {    
+    console.error('Error starting Ron 24/7:', error);    
+    return { success: false, message: error.message };    
+  }    
+});
   
 // Handler para detener Ron 24/7  
 ipcMain.handle('stop-ron-247', async () => {  

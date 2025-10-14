@@ -451,6 +451,96 @@ ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
   }
 });
 
+
+
+// Handler para chat con streaming  
+ipcMain.handle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) => {  
+  const q = (text || '').trim();  
+  if (!q) return { ok: false, text: 'Mensaje vacío' };  
+  
+  // Resolver base URL  
+  const userData = app.getPath('userData');  
+  let apiBase = (process.env.RON_API_URL || '').trim();  
+  try {  
+    if (!apiBase && fs2.existsSync(path.join(userData, 'config.json'))) {  
+      const cfg = JSON.parse(fs2.readFileSync(path.join(userData, 'config.json'), 'utf-8'));  
+      apiBase = (cfg.RON_API_URL || '').trim();  
+    }  
+  } catch {}  
+  
+  if (!apiBase) apiBase = 'https://ron-production.up.railway.app';  
+  
+  const base = (() => {  
+    let u = apiBase;  
+    while (u.endsWith('/')) u = u.slice(0, -1);  
+    return u;  
+  })();  
+  
+  try {  
+    const res = await fetchImpl(`${base}/ron/stream`, {  
+      method: 'POST',  
+      headers: {  
+        'Content-Type': 'application/json',  
+        ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),  
+      },  
+      body: JSON.stringify({  
+        text: q,  
+        username,  
+      }),  
+    });  
+  
+    if (!res.ok) {  
+      throw new Error(`HTTP ${res.status}`);  
+    }  
+  
+    // Leer stream SSE  
+    const reader = res.body.getReader();  
+    const decoder = new TextDecoder();  
+    let buffer = '';  
+  
+    while (true) {  
+      const { done, value } = await reader.read();  
+        
+      if (done) break;  
+        
+      buffer += decoder.decode(value, { stream: true });  
+        
+      // Procesar líneas completas  
+      const lines = buffer.split('\n');  
+      buffer = lines.pop() || ''; // Guardar línea incompleta  
+        
+      for (const line of lines) {  
+        if (line.startsWith('data: ')) {  
+          const data = JSON.parse(line.slice(6));  
+            
+          if (data.chunk) {  
+            // Enviar chunk al renderer  
+            mainWindow?.webContents.send('ron-stream-chunk', data.chunk);  
+          }  
+            
+          if (data.done) {  
+            mainWindow?.webContents.send('ron-stream-done');  
+            return { ok: true, streaming: true };  
+          }  
+            
+          if (data.error) {  
+            mainWindow?.webContents.send('ron-stream-error', data.error);  
+            return { ok: false, error: data.error };  
+          }  
+        }  
+      }  
+    }  
+  
+    return { ok: true, streaming: true };  
+  
+  } catch (err) {  
+    console.error('[ask-ron-stream] error:', err);  
+    return { ok: false, text: 'Error en streaming' };  
+  }  
+});
+
+
+
   
 // Handler para iniciar Ron 24/7    
 ipcMain.handle('start-ron-247', async (_event, userData) => {    

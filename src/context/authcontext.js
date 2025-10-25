@@ -6,7 +6,7 @@ const AuthContext = createContext();
 export const useAuth = () => useContext(AuthContext);
 
 // Igual que en services/api.js
-const RAW_BASE = process.env.REACT_APP_API_URL || 'https://ron-app.up.railway.app';
+const RAW_BASE = process.env.REACT_APP_API_URL || 'https://ron-production.up.railway.app';
 const API_BASE = (RAW_BASE || '').replace(/\/+$/, '');
 
 export const AuthProvider = ({ children }) => {

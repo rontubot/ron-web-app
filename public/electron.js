@@ -5,6 +5,22 @@ const { spawn } = require('child_process');
 const net = require('net');  
 const fs = require('fs').promises;  
 const fs2 = require('fs');  
+
+
+
+// >>> PATCH (arriba):
+const { TextDecoder } = require('util');
+
+// >>> PATCH: helpers para evitar handlers/eventos duplicados
+function safeHandle(channel, fn) {
+  try { ipcMain.removeHandler(channel); } catch {}
+  ipcMain.handle(channel, fn);
+}
+function safeOn(channel, listener) {
+  ipcMain.removeAllListeners(channel);
+  ipcMain.on(channel, listener);
+}
+
   
 // (opcional) variables de entorno para el proceso principal  
 try { require('dotenv').config(); } catch (_) {}  
@@ -16,7 +32,7 @@ const fetchImpl = global.fetch || (async (...args) => {
 });  
   
 // (opcional) URL backend si luego usas el proxy IPC ron:req  
-const API_URL = (process.env.RON_API_URL || 'https://ron-production.up.railway.app').replace(/\/+$/, '');  
+let API_URL = (process.env.RON_API_URL || 'https://ron-production.up.railway.app').replace(/\/+$/, '');  
 let AUTH_TOKEN = null;  
 let mainWindow;  
 let ronPythonProcess = null;  
@@ -236,47 +252,49 @@ async function sendCommandToRon(command) {
 }  
   
 // --------- Handlers IPC ----------  
-ipcMain.handle('auth:set-token', async (_evt, token) => {  
+safeHandle('auth:set-token', async (_evt, token) => {  
   AUTH_TOKEN = (token || '').trim() || null;  
   return { ok: true };  
 });  
   
-ipcMain.handle('auth:get-token', async () => {   
+safeHandle('auth:get-token', async () => {   
   return { ok: true, token: AUTH_TOKEN };  
 });  
   
-ipcMain.handle('auth:clear-token', async () => {  
+safeHandle('auth:clear-token', async () => {  
   AUTH_TOKEN = null;  
   return { ok: true };  
 });  
   
 // HANDLER AGREGADO: auth:set-api-base  
-ipcMain.handle('auth:set-api-base', async (_evt, url) => {  
-  const cleanUrl = (url || '').trim().replace(/\/+$/, ''); // CORREGIDO: sin backslash extra  
-  if (cleanUrl) {  
-    process.env.RON_API_URL = cleanUrl;  
-    try {  
-      const configPath = path.join(app.getPath('userData'), 'config.json');  
-      let config = {};  
-      try {  
-        config = JSON.parse(fs2.readFileSync(configPath, 'utf-8'));  
-      } catch {}  
-      config.RON_API_URL = cleanUrl;  
-      fs2.writeFileSync(configPath, JSON.stringify(config, null, 2));  
-    } catch (err) {  
-      console.warn('No se pudo guardar config.json:', err);  
-    }  
-  }  
-  return { ok: true };  
+safeHandle('auth:set-api-base', async (_evt, url) => {
+  const cleanUrl = (url || '').trim().replace(/\/+$/, '');
+  if (cleanUrl) {
+    // 1) actualiza variable en memoria (afecta inmediatamente a 'ron:req', etc.)
+    API_URL = cleanUrl;
+
+    // 2) persiste en env y config (para siguientes arranques)
+    process.env.RON_API_URL = cleanUrl;
+    try {
+      const configPath = path.join(app.getPath('userData'), 'config.json');
+      let config = {};
+      try { config = JSON.parse(fs2.readFileSync(configPath, 'utf-8')); } catch {}
+      config.RON_API_URL = cleanUrl;
+      fs2.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    } catch (err) {
+      console.warn('No se pudo guardar config.json:', err);
+    }
+  }
+  return { ok: true, base: API_URL };
 });
 
 
-// Handler para preguntas a Ron (chat de texto)  
-ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
+// >>> PATCH ÚNICO: handler con SSE + fallback y canales alineados
+safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) => {
   const q = (text || '').trim();
   if (!q) return { ok: false, text: 'Mensaje vacío' };
 
-  // 1) Resolver base URL de la API
+  // Resolver base URL (lee env y config si existen)
   const userData = app.getPath('userData');
   let apiBase = (process.env.RON_API_URL || '').trim();
   try {
@@ -285,265 +303,97 @@ ipcMain.handle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {
       apiBase = (cfg.RON_API_URL || '').trim();
     }
   } catch {}
+  if (!apiBase) apiBase = API_URL; // usa la base actual mutable
+  while (apiBase.endsWith('/')) apiBase = apiBase.slice(0, -1);
 
-  if (!apiBase) apiBase = 'https://ron-production.up.railway.app';
+  console.log('[ask-ron-stream] base =', apiBase, 'token?', !!AUTH_TOKEN);
 
-  // Limpieza segura de barras finales (sin regex frágiles)
-  const base = (() => {
-    let u = apiBase;
-    while (u.endsWith('/')) u = u.slice(0, -1);
-    return u;
-  })();
-
-  // Verificación robusta de URL
-  let looksLikeUrl = false;
-  try {
-    const u = new URL(base);
-    looksLikeUrl = (u.protocol === 'http:' || u.protocol === 'https:');
-  } catch {}
-
-  // 2) Intentar Railway primero si hay URL válida
-  if (looksLikeUrl) {
+  // ---- Fallback a /ron normal, simulando “chunks” ----
+  const fallbackToNonStream = async () => {
     try {
-      const res = await fetchImpl(`${base}/ron`, {
+      const res = await fetchImpl(`${apiBase}/ron`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),
         },
-        body: JSON.stringify({
-          text: q,
-          message: q,
-          username,
-          return_json: true,
-          source: 'desktop',
-        }),
+        body: JSON.stringify({ text: q, message: q, username, return_json: true, source: 'desktop' }),
       });
 
       const raw = await res.text();
-      console.log('[ask-ron] Raw response from Railway:', raw);
+      let data; try { data = JSON.parse(raw); } catch { data = { user_response: raw }; }
+      const full = (data?.user_response || data?.ron || '').toString();
+      if (!full) throw new Error('Respuesta vacía');
 
-      let data;
-      try {
-        data = JSON.parse(raw);
-        console.log('[ask-ron] Parsed data:', JSON.stringify(data, null, 2));
-      } catch (e) {
-        console.error('[ask-ron] JSON parse error:', e);
-        data = { user_response: raw };
-      }
-
-      // Si hay comandos Y Ron 24/7 está activo, ejecutarlos localmente  
-      if (Array.isArray(data?.commands) && data.commands.length > 0) {  
-        console.log(`[ask-ron] Recibidos ${data.commands.length} comandos desde Railway`);  
-        
-        if (!ronPythonProcess) {  
-          console.warn('[ask-ron] Ron 24/7 no está activo, no se pueden ejecutar comandos');  
-          mainWindow?.webContents.send('ron-247-output',  
-            '⚠️ Ron 24/7 no está activo. Inicia Ron 24/7 para ejecutar comandos localmente.\n'  
-          );  
-        } else {  
-          try {  
-            // Procesar cada comandos  
-            for (const cmd of data.commands) {  
-              // CASO ESPECIAL: Plan autónomo  
-              if (cmd.action === 'execute_autonomous_plan') {  
-                const plan = cmd.params?.plan;  
-                if (plan && plan.steps) {  
-                  console.log(`[ask-ron] Ejecutando plan autónomo: ${plan.task}`);  
-                    
-                  // Convertir plan a formato de comandos ejecutables  
-                  const execPayload = {  
-                    commands: plan.steps.map(step => ({  
-                      action: 'execute_windows_command',  
-                      params: {  
-                        type: step.type || 'cmd',  
-                        command: step.command,  
-                        description: step.description || 'Comando del sistema',  
-                        timeout: step.timeout || 30  
-                      }  
-                    }))  
-                  };  
-                    
-                  // Enviar al socket EXEC::  
-                  const socketResponse = await sendCommandToRon(`EXEC::${JSON.stringify(execPayload)}`);  
-                  console.log('[ask-ron] Respuesta del plan autónomo:', socketResponse);  
-                    
-                  mainWindow?.webContents.send('ron-247-output',  
-                    `✅ Plan autónomo ejecutado: ${plan.steps.length} paso(s)\n`  
-                  );  
-                }  
-              }   
-              // CASO ESPECIAL: Comando de Windows directo  
-              else if (cmd.type && ['cmd', 'powershell', 'python'].includes(cmd.type)) {  
-                console.log(`[ask-ron] Comando de Windows directo: ${cmd.type}`);  
-                  
-                const execPayload = {  
-                  commands: [{  
-                    action: 'execute_windows_command',  
-                    params: {  
-                      type: cmd.type,  
-                      command: cmd.command,  
-                      description: `Comando ${cmd.type}`,  
-                      safe: cmd.safe !== false  
-                    }  
-                  }]  
-                };  
-                  
-                const socketResponse = await sendCommandToRon(`EXEC::${JSON.stringify(execPayload)}`);  
-                console.log('[ask-ron] Respuesta del comando Windows:', socketResponse);  
-                  
-                mainWindow?.webContents.send('ron-247-output',  
-                  `✅ Comando ${cmd.type} ejecutado\n`  
-                );  
-              }  
-              // COMANDOS BÁSICOS (existentes)  
-              else if (cmd.action) {  
-                const execPayload = { commands: [cmd] };  
-                const socketResponse = await sendCommandToRon(`EXEC::${JSON.stringify(execPayload)}`);  
-                console.log('[ask-ron] Respuesta del comando básico:', socketResponse);  
-              }  
-            }  
-              
-            mainWindow?.webContents.send('ron-247-output',  
-              `✅ ${data.commands.length} comando(s) procesado(s)\n`  
-            );  
-          } catch (e) {  
-            console.error('[ask-ron] Error ejecutando comandos vía socket:', e);  
-            mainWindow?.webContents.send('ron-247-output',  
-              '❌ Error ejecutando comandos: Ron 24/7 no responde. Verifica que esté activo.\n'  
-            );  
-          }  
-        }  
-      } else {  
-        console.log('[ask-ron] No hay comandos para ejecutar');  
-      }
-
-      const replyText =
-        data?.user_response ??
-        data?.ron ??
-        data?.reply ??
-        data?.text ??
-        data?.message ??
-        data?.message_text ??
-        (typeof data === 'string' ? data : '') ??
-        '';
-
-      return { ok: res.ok, text: replyText || (res.ok ? 'Sin respuesta' : `Error ${res.status}`) };
+      // “fake stream”: despedazá por oraciones o saltos de línea
+      const parts = full.split(/(\.\s+|\n+)/).filter(Boolean);
+      for (const part of parts) mainWindow?.webContents.send('stream-chunk', part);
+      mainWindow?.webContents.send('stream-done');
+      return { ok: true, streaming: false };
     } catch (err) {
-      console.warn('[ask-ron] fetch a Railway falló, uso fallback socket CHAT::', err?.message || err);
+      console.error('[ask-ron-stream] fallback error:', err);
+      mainWindow?.webContents.send('stream-error', err?.message || String(err));
+      return { ok: false, text: 'Error en streaming (fallback)' };
     }
-  }
+  };
 
-  // 4) Fallback: intentar socket directo (solo si Ron 24/7 está activo)
-  if (!ronPythonProcess) {
-    return {
-      ok: false,
-      text: 'Ron 24/7 no está ejecutándose. Inicia Ron 24/7 desde la interfaz para usar el chat de texto.'
-    };
-  }
-
+  // ---- Intentar SSE real ----
   try {
-    const resp = await sendCommandToRon(`CHAT::${q}`);
-    return { ok: true, text: resp || 'Sin respuesta' };
-  } catch (e) {
-    console.error('[ask-ron] socket fallback también falló:', e);
-    return { ok: false, text: 'No se pudo contactar a Ron 24/7. Verifica que esté ejecutándose.' };
+    const res = await fetchImpl(`${apiBase}/ron/stream`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Accept': 'text/event-stream',
+        ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),
+      },
+      body: JSON.stringify({ text: q, username }),
+    });
+
+    if (!res.ok) {
+      console.warn(`[ask-ron-stream] HTTP ${res.status}, usando fallback`);
+      if (res.status === 404 || res.status === 401) return await fallbackToNonStream();
+      throw new Error(`HTTP ${res.status}`);
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n');
+      buffer = lines.pop() || '';
+
+      for (const line of lines) {
+        if (!line || !line.startsWith('data: ')) continue;
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (data.chunk) mainWindow?.webContents.send('stream-chunk', data.chunk);
+          if (data.done)  { mainWindow?.webContents.send('stream-done'); return { ok: true, streaming: true }; }
+          if (data.error) { mainWindow?.webContents.send('stream-error', data.error); return { ok: false, error: data.error }; }
+        } catch (e) {
+          console.warn('SSE JSON parse:', e);
+        }
+      }
+    }
+
+    mainWindow?.webContents.send('stream-done');
+    return { ok: true, streaming: true };
+
+  } catch (err) {
+    console.error('[ask-ron-stream] error:', err);
+    return await fallbackToNonStream();
   }
-});
-
-
-
-// Handler para chat con streaming  
-ipcMain.handle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) => {  
-  const q = (text || '').trim();  
-  if (!q) return { ok: false, text: 'Mensaje vacío' };  
-  
-  // Resolver base URL  
-  const userData = app.getPath('userData');  
-  let apiBase = (process.env.RON_API_URL || '').trim();  
-  try {  
-    if (!apiBase && fs2.existsSync(path.join(userData, 'config.json'))) {  
-      const cfg = JSON.parse(fs2.readFileSync(path.join(userData, 'config.json'), 'utf-8'));  
-      apiBase = (cfg.RON_API_URL || '').trim();  
-    }  
-  } catch {}  
-  
-  if (!apiBase) apiBase = 'https://ron-production.up.railway.app';  
-  
-  const base = (() => {  
-    let u = apiBase;  
-    while (u.endsWith('/')) u = u.slice(0, -1);  
-    return u;  
-  })();  
-  
-  try {  
-    const res = await fetchImpl(`${base}/ron/stream`, {  
-      method: 'POST',  
-      headers: {  
-        'Content-Type': 'application/json',  
-        ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),  
-      },  
-      body: JSON.stringify({  
-        text: q,  
-        username,  
-      }),  
-    });  
-  
-    if (!res.ok) {  
-      throw new Error(`HTTP ${res.status}`);  
-    }  
-  
-    // Leer stream SSE  
-    const reader = res.body.getReader();  
-    const decoder = new TextDecoder();  
-    let buffer = '';  
-  
-    while (true) {  
-      const { done, value } = await reader.read();  
-        
-      if (done) break;  
-        
-      buffer += decoder.decode(value, { stream: true });  
-        
-      // Procesar líneas completas  
-      const lines = buffer.split('\n');  
-      buffer = lines.pop() || ''; // Guardar línea incompleta  
-        
-      for (const line of lines) {  
-        if (line.startsWith('data: ')) {  
-          const data = JSON.parse(line.slice(6));  
-            
-          if (data.chunk) {  
-            // Enviar chunk al renderer  
-            mainWindow?.webContents.send('ron-stream-chunk', data.chunk);  
-          }  
-            
-          if (data.done) {  
-            mainWindow?.webContents.send('ron-stream-done');  
-            return { ok: true, streaming: true };  
-          }  
-            
-          if (data.error) {  
-            mainWindow?.webContents.send('ron-stream-error', data.error);  
-            return { ok: false, error: data.error };  
-          }  
-        }  
-      }  
-    }  
-  
-    return { ok: true, streaming: true };  
-  
-  } catch (err) {  
-    console.error('[ask-ron-stream] error:', err);  
-    return { ok: false, text: 'Error en streaming' };  
-  }  
 });
 
 
 
   
 // Handler para iniciar Ron 24/7    
-ipcMain.handle('start-ron-247', async (_event, userData) => {    
+safeHandle('start-ron-247', async (_event, userData) => {    
   try {    
     if (ronPythonProcess) {    
       return { success: false, message: 'Ron 24/7 ya está ejecutándose' };    
@@ -639,7 +489,7 @@ ipcMain.handle('start-ron-247', async (_event, userData) => {
 });
   
 // Handler para detener Ron 24/7  
-ipcMain.handle('stop-ron-247', async () => {  
+safeHandle('stop-ron-247', async () => {  
   try {  
     if (!ronPythonProcess) {  
       return { success: false, message: 'Ron 24/7 no está ejecutándose' };  
@@ -663,7 +513,7 @@ ipcMain.handle('stop-ron-247', async () => {
 });  
   
 // Handlers para grabación manual  
-ipcMain.handle('start-manual-recording', async () => {    
+safeHandle('start-manual-recording', async () => {    
   try {    
     if (!ronPythonProcess) {    
       return { success: false, message: 'Ron 24/7 no está ejecutándose' };    
@@ -682,7 +532,7 @@ ipcMain.handle('start-manual-recording', async () => {
   }    
 });    
     
-ipcMain.handle('stop-manual-recording', async () => {    
+safeHandle('stop-manual-recording', async () => {    
   try {    
     if (!ronPythonProcess) {    
       return { success: false, message: 'Ron 24/7 no está ejecutándose' };    
@@ -702,7 +552,7 @@ ipcMain.handle('stop-manual-recording', async () => {
 });  
   
 // Handler para obtener estado de Ron 24/7  
-ipcMain.handle('get-ron-247-status', async () => {  
+safeHandle('get-ron-247-status', async () => {  
   if (ronPythonProcess) {  
     try {  
       const socketStatus = await sendCommandToRon('STATUS');  
@@ -715,7 +565,7 @@ ipcMain.handle('get-ron-247-status', async () => {
 });  
   
 // Proxy HTTP por IPC (evita CORS)  
-ipcMain.handle('ron:req', async (_evt, { path: subpath = '/', method = 'GET', headers = {}, body } = {}) => {  
+safeHandle('ron:req', async (_evt, { path: subpath = '/', method = 'GET', headers = {}, body } = {}) => {  
   try {  
     const url = `${API_URL}${subpath.startsWith('/') ? '' : '/'}${subpath}`;  
     const res = await fetchImpl(url, {  

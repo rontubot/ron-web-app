@@ -85,6 +85,7 @@ async function downloadPythonFiles() {
     { url: `${baseUrl}/core/profile.py`,       path: path.join(baseDir, 'core', 'profile.py') },    
     { url: `${baseUrl}/config.py`,             path: path.join(baseDir, 'config.py') },    
     { url: `${baseUrl}/core/autonomous.py`,    path: path.join(baseDir, 'core', 'autonomous.py') },  
+    { url: `${baseUrl}/core/task_manager.py`,  path: path.join(baseDir, 'core', 'task_manager.py') },
   ];    
     
   async function fetchText(url) {    
@@ -289,106 +290,241 @@ safeHandle('auth:set-api-base', async (_evt, url) => {
 });
 
 
-// >>> PATCH ÚNICO: handler con SSE + fallback y canales alineados
-safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) => {
-  const q = (text || '').trim();
-  if (!q) return { ok: false, text: 'Mensaje vacío' };
 
-  // Resolver base URL (lee env y config si existen)
-  const userData = app.getPath('userData');
-  let apiBase = (process.env.RON_API_URL || '').trim();
-  try {
-    if (!apiBase && fs2.existsSync(path.join(userData, 'config.json'))) {
-      const cfg = JSON.parse(fs2.readFileSync(path.join(userData, 'config.json'), 'utf-8'));
-      apiBase = (cfg.RON_API_URL || '').trim();
-    }
-  } catch {}
-  if (!apiBase) apiBase = API_URL; // usa la base actual mutable
-  while (apiBase.endsWith('/')) apiBase = apiBase.slice(0, -1);
-
-  console.log('[ask-ron-stream] base =', apiBase, 'token?', !!AUTH_TOKEN);
-
-  // ---- Fallback a /ron normal, simulando “chunks” ----
-  const fallbackToNonStream = async () => {
-    try {
-      const res = await fetchImpl(`${apiBase}/ron`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),
-        },
-        body: JSON.stringify({ text: q, message: q, username, return_json: true, source: 'desktop' }),
-      });
-
-      const raw = await res.text();
-      let data; try { data = JSON.parse(raw); } catch { data = { user_response: raw }; }
-      const full = (data?.user_response || data?.ron || '').toString();
-      if (!full) throw new Error('Respuesta vacía');
-
-      // “fake stream”: despedazá por oraciones o saltos de línea
-      const parts = full.split(/(\.\s+|\n+)/).filter(Boolean);
-      for (const part of parts) mainWindow?.webContents.send('stream-chunk', part);
-      mainWindow?.webContents.send('stream-done');
-      return { ok: true, streaming: false };
-    } catch (err) {
-      console.error('[ask-ron-stream] fallback error:', err);
-      mainWindow?.webContents.send('stream-error', err?.message || String(err));
-      return { ok: false, text: 'Error en streaming (fallback)' };
-    }
-  };
-
-  // ---- Intentar SSE real ----
-  try {
-    const res = await fetchImpl(`${apiBase}/ron/stream`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'text/event-stream',
-        ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),
-      },
-      body: JSON.stringify({ text: q, username }),
-    });
-
-    if (!res.ok) {
-      console.warn(`[ask-ron-stream] HTTP ${res.status}, usando fallback`);
-      if (res.status === 404 || res.status === 401) return await fallbackToNonStream();
-      throw new Error(`HTTP ${res.status}`);
-    }
-
-    const reader = res.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-
-      buffer += decoder.decode(value, { stream: true });
-      const lines = buffer.split('\n');
-      buffer = lines.pop() || '';
-
-      for (const line of lines) {
-        if (!line || !line.startsWith('data: ')) continue;
-        try {
-          const data = JSON.parse(line.slice(6));
-          if (data.chunk) mainWindow?.webContents.send('stream-chunk', data.chunk);
-          if (data.done)  { mainWindow?.webContents.send('stream-done'); return { ok: true, streaming: true }; }
-          if (data.error) { mainWindow?.webContents.send('stream-error', data.error); return { ok: false, error: data.error }; }
-        } catch (e) {
-          console.warn('SSE JSON parse:', e);
-        }
+safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) => {  
+  const q = (text || '').trim();  
+  if (!q) return { ok: false, text: 'Mensaje vacío' };  
+  
+  // Resolver base URL
+  const userData = app.getPath('userData');  
+  let apiBase = (process.env.RON_API_URL || '').trim();  
+  try {  
+    if (!apiBase && fs2.existsSync(path.join(userData, 'config.json'))) {  
+      const cfg = JSON.parse(fs2.readFileSync(path.join(userData, 'config.json'), 'utf-8'));  
+      apiBase = (cfg.RON_API_URL || '').trim();  
+    }  
+  } catch {}  
+  if (!apiBase) apiBase = API_URL;  
+  while (apiBase.endsWith('/')) apiBase = apiBase.slice(0, -1);  
+  
+  console.log('[ask-ron-stream] base =', apiBase, 'token?', !!AUTH_TOKEN);  
+  
+  // ---- Fallback a /ron normal, simulando "chunks" ----  
+  const fallbackToNonStream = async () => {  
+    try {  
+      const res = await fetchImpl(`${apiBase}/ron`, {  
+        method: 'POST',  
+        headers: {  
+          'Content-Type': 'application/json',  
+          ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),  
+        },  
+        body: JSON.stringify({ text: q, message: q, username, return_json: true, source: 'desktop' }),  
+      });  
+  
+      const raw = await res.text();  
+      let data; 
+      try { 
+        data = JSON.parse(raw); 
+      } catch { 
+        data = { user_response: raw }; 
+      }  
+  
+      const full = (data?.user_response || data?.ron || '').toString();  
+      if (!full) throw new Error('Respuesta vacía');  
+  
+      const parts = full.split(/(\.\s+|\n+)/).filter(Boolean);  
+      for (const part of parts) { 
+        mainWindow?.webContents.send('stream-chunk', part);  
       }
-    }
+      mainWindow?.webContents.send('stream-done');  
+      return { ok: true, streaming: false };  
+    } catch (err) {  
+      console.error('[ask-ron-stream] fallback error:', err);  
+      mainWindow?.webContents.send('stream-error', err?.message || String(err));  
+      return { ok: false, text: 'Error en streaming (fallback)' };  
+    }  
+  };  
 
-    mainWindow?.webContents.send('stream-done');
-    return { ok: true, streaming: true };
+  // ---- Streaming SSE real ----
+  try {  
+    const res = await fetchImpl(`${apiBase}/ron/stream`, {  
+      method: 'POST',  
+      headers: {  
+        'Content-Type': 'application/json',  
+        'Accept': 'text/event-stream',  
+        ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),  
+      },  
+      body: JSON.stringify({ text: q, username }),  
+    });  
+  
+    if (!res.ok) {  
+      console.warn(`[ask-ron-stream] HTTP ${res.status}, usando fallback`);  
+      if (res.status === 404 || res.status === 401) return await fallbackToNonStream();  
+      throw new Error(`HTTP ${res.status}`);  
+    }  
+  
+    const reader = res.body.getReader();  
+    const decoder = new TextDecoder();  
+    let buffer = '';  
+    let receivedCommands = null;  
+  
+    while (true) {  
+      const { done, value } = await reader.read();  
+      if (done) break;  
+  
+      buffer += decoder.decode(value, { stream: true });  
+      const lines = buffer.split('\n');  
+      buffer = lines.pop() || '';  
+  
+      for (const line of lines) {    
+        if (!line || !line.startsWith('data: ')) continue;    
+    
+        try {    
+          const data = JSON.parse(line.slice(6));    
+          
+          // PROGRESO: type=progress + chunk
+          if (data.type === 'progress' && data.chunk) {    
+            mainWindow?.webContents.send('stream-chunk', data.chunk);    
+            continue; // no procesar nada más en este evento    
+          }    
 
-  } catch (err) {
-    console.error('[ask-ron-stream] error:', err);
-    return await fallbackToNonStream();
-  }
+          // Guardar comandos si vienen en cualquier evento
+          if (Array.isArray(data.commands) && data.commands.length > 0) {    
+            receivedCommands = data.commands;    
+          }  
+
+          // ERROR: type=error o campo error
+          if (data.type === 'error' || data.error) {    
+            const errMsg = data.error || 'Error en streaming';  
+            mainWindow?.webContents.send('stream-error', errMsg);    
+            return { ok: false, error: errMsg };    
+          }  
+
+          // FIN: type=done o data.done == true
+          if (data.type === 'done' || data.done) {    
+            // texto final si viene
+            if (data.full_text) {  
+              mainWindow?.webContents.send('stream-chunk', data.full_text);  
+            }  
+
+            // Ejecutar comandos UNA sola vez al final
+            if (Array.isArray(receivedCommands) && receivedCommands.length > 0) {    
+              console.log(`[ask-ron-stream] Ejecutando ${receivedCommands.length} comando(s) vía Python`);    
+                
+              try {    
+                const pythonScriptsDir = app.isPackaged    
+                  ? path.join(app.getPath('userData'), 'python-scripts')    
+                  : path.join(process.cwd(), 'python-scripts');    
+                  
+                const pythonCode = `\
+import sys
+import os
+import json
+
+sys.path.insert(0, r"${pythonScriptsDir}")
+sys.path.insert(0, r"${path.join(pythonScriptsDir, 'core')}")
+
+from core.commands import run_command
+
+commands = ${JSON.stringify(receivedCommands)}
+
+results = []
+for cmd in commands:
+    action = cmd.get('action', '')
+    params = cmd.get('params', {})
+    if action:
+        try:
+            result = run_command(action, params, {'username': '${username}'})
+            results.append({
+                'action': action,
+                'ok': result.get('ok', True),
+                'message': result.get('message', str(result))
+            })
+        except Exception as e:
+            results.append({
+                'action': action,
+                'ok': False,
+                'error': str(e)
+            })
+
+print(json.dumps(results, ensure_ascii=False))
+`;  
+                
+                await new Promise((resolve) => {    
+                  const pythonProcess = spawn('python', ['-u', '-c', pythonCode], {    
+                    cwd: pythonScriptsDir,    
+                    env: { 
+                      ...process.env, 
+                      PYTHONIOENCODING: 'utf-8',
+                      RON_API_URL: API_URL,
+                      RON_AUTH_TOKEN: AUTH_TOKEN || '',
+                    },    
+                  });    
+                    
+                  let output = '';    
+                  let errorOutput = '';    
+                    
+                  pythonProcess.stdout.on('data', (data) => {    
+                    output += data.toString();    
+                  });    
+                    
+                  pythonProcess.stderr.on('data', (data) => {    
+                    errorOutput += data.toString();    
+                    console.log('[Python stderr]:', data.toString());    
+                  });    
+                    
+                  pythonProcess.on('close', (code) => {    
+                    if (code === 0 && output) {    
+                      try {    
+                        const results = JSON.parse(output);    
+                        console.log('[ask-ron-stream] Resultados:', results);    
+                        mainWindow?.webContents.send('command-results', results);    
+                        const successCount = results.filter(r => r.ok).length;    
+                        console.log(`✅ ${successCount} comando(s) ejecutado(s) exitosamente`);    
+                      } catch (e) {    
+                        console.error('[ask-ron-stream] Error parseando resultados:', e);    
+                      }    
+                    } else if (errorOutput) {    
+                      console.error('[ask-ron-stream] Python error output:', errorOutput);    
+                    }    
+                    resolve();    
+                  });    
+                    
+                  pythonProcess.on('error', (err) => {    
+                    console.error('[ask-ron-stream] Error ejecutando Python:', err);    
+                    resolve();    
+                  });    
+                });    
+                  
+              } catch (e) {    
+                console.error('[ask-ron-stream] Error ejecutando comandos:', e);    
+              }    
+            }  
+              
+            mainWindow?.webContents.send('stream-done');    
+            return { ok: true, streaming: true };    
+          }    
+          
+          // Formato antiguo: solo chunk
+          if (data.chunk && !data.type) {    
+            mainWindow?.webContents.send('stream-chunk', data.chunk);    
+          }  
+    
+        } catch (e) {    
+          console.warn('SSE JSON parse:', e);    
+        }    
+      }  
+    }  
+  
+    // Si el stream termina sin un "done" explícito
+    mainWindow?.webContents.send('stream-done');  
+    return { ok: true, streaming: true };  
+  
+  } catch (err) {  
+    console.error('[ask-ron-stream] error:', err);  
+    return await fallbackToNonStream();  
+  }  
 });
-
 
 
   

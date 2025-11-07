@@ -166,55 +166,86 @@ app.get('/user/conversations', authenticateToken, async (req, res) => {
   }  
 });  
   
-// Endpoint principal de chat - PROXY al servidor principal con autenticación  
-app.post('/ron', authenticateToken, async (req, res) => {  
-  // Logging para diagnosticar el problema del campo text  
-  console.log(`🤖 Proxy chat para: ${req.user.username}`);  
-  console.log(`📦 Body completo recibido:`, JSON.stringify(req.body, null, 2));  
-    
-  try {  
-    const { text } = req.body;  
-    console.log(`📝 Campo text extraído: "${text}"`);  
-    console.log(`📝 Tipo de text: ${typeof text}`);  
-  
-    if (!text) {  
-      console.log(`❌ Texto faltante o undefined`);  
-      return res.status(400).json({ detail: 'Texto requerido' });  
-    }  
-  
-    // Llamar al servidor de Ron existente con autenticación  
-    const response = await axios.post(`${RON_API_URL}/ron`, {  
-      text: text  
-    }, {  
-      headers: {  
-        'Authorization': req.headers['authorization'],  
-        'Content-Type': 'application/json'  
-      },  
-      timeout: 30000  
-    });  
-  
-    res.json({  
-      ron: response.data.ron,  
-      shutdown: response.data.shutdown || false,
-      commands: response.data.commands || []   
-    });  
-  
-  } catch (error) {  
-    console.error('❌ Error al comunicarse con Ron:', error.message);  
-        
-    if (error.code === 'ECONNABORTED') {  
-      return res.status(408).json({ detail: 'Timeout al comunicarse con Ron' });  
-    }  
-        
-    if (error.response) {  
-      return res.status(error.response.status).json({  
-        detail: error.response.data.detail || 'Error del servidor de Ron'  
-      });  
-    }  
-  
-    res.status(500).json({ detail: 'Error al comunicarse con Ron' });  
-  }  
-});  
+// Endpoint principal de chat - PROXY al servidor principal con autenticación
+app.post('/ron', authenticateToken, async (req, res) => {
+  console.log(`🤖 Proxy /ron para: ${req.user.username}`);
+  console.log('📦 Body recibido en proxy /ron:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const body = req.body || {};
+    const text = (body.text || body.message || '').trim();
+    const source = body.source || 'electron';
+    const username = req.user?.username || body.username || null;
+
+    if (!text) {
+      console.log('❌ Texto faltante o vacío en proxy /ron');
+      return res.status(400).json({ detail: 'Texto requerido' });
+    }
+
+    // Payload hacia la API de Ron (UserInput en el backend)
+    const payload = {
+      text,
+      // dejamos estos campos por compat futura, aunque el backend ahora no los necesite mucho
+      message: body.message || null,
+      source,
+      username,
+      return_json: true, // por si en algún momento lo volvemos a usar
+    };
+
+    // Llamar al servidor de Ron existente con autenticación
+    const response = await axios.post(
+      `${RON_API_URL}/ron`,
+      payload,
+      {
+        headers: {
+          Authorization: req.headers['authorization'],
+          'Content-Type': 'application/json',
+        },
+        timeout: 30000,
+      }
+    );
+
+    const data = response.data || {};
+
+    // Normalizar respuesta para el front:
+    // - user_response: texto principal
+    // - ron: alias para código antiguo que aún lea 'ron'
+    // - commands: lista de comandos
+    // - shutdown: bandera (por ahora siempre false desde el backend)
+    // - warning / error si vienen
+    const userResponse = data.user_response ?? data.ron ?? '';
+
+    const payloadToClient = {
+      user_response: userResponse,
+      ron: userResponse, // alias legacy
+      commands: data.commands || [],
+      shutdown: data.shutdown ?? false,
+    };
+
+    if (data.warning) payloadToClient.warning = data.warning;
+    if (data.error) payloadToClient.error = data.error;
+
+    console.log('📤 Respuesta normalizada hacia el front:', JSON.stringify(payloadToClient, null, 2));
+    return res.json(payloadToClient);
+  } catch (error) {
+    console.error('❌ Error al comunicarse con Ron:', error.message);
+
+    if (error.code === 'ECONNABORTED') {
+      return res.status(408).json({ detail: 'Timeout al comunicarse con Ron' });
+    }
+
+    if (error.response) {
+      return res.status(error.response.status).json({
+        detail:
+          (error.response.data && error.response.data.detail) ||
+          'Error del servidor de Ron',
+      });
+    }
+
+    return res.status(500).json({ detail: 'Error al comunicarse con Ron' });
+  }
+});
+
   
 // Endpoints de utilidad - PROXY al servidor principal  
 app.get('/health', async (req, res) => {  

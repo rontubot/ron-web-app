@@ -25,8 +25,12 @@ const sanitizeRonText = (raw = '') => {
   } catch (e) {}    
     
   let text = raw.replace(/\\n/g, '\n');    
-  text = text.replace(/\{"user_response".*?"commands":\[.*?\]\}/gs, '');    
-  text = text.replace(/\{"action".*?"params":\{.*?\}\}/gs, '');    
+
+  // Quitar cualquier blob JSON que tenga user_response/commands,
+  // aunque tenga saltos de línea o espacios raros
+  text = text.replace(/\{"user_response"[\s\S]*?"commands":\[[\s\S]*?\]\}/g, '');    
+  text = text.replace(/\{"action"[\s\S]*?"params":\{[\s\S]*?\}\}/g, '');    
+   
     
   const lines = text.split(/\r?\n/).map(l => l.trim());    
     
@@ -255,53 +259,68 @@ const Chat = () => {
         }    
       }    
     
-      if (!streamingSupported) {    
-        let ronText = '';    
-    
-        if (window?.electronAPI?.askRon) {    
-          const res = await window.electronAPI.askRon({ text });    
-          if (res?.ok) {    
-            const raw = typeof res.text === 'string'    
-              ? res.text    
-              : (res?.ron ?? res?.reply ?? res?.user_response ?? res?.message ?? JSON.stringify(res.text ?? ''));    
-            ronText = sanitizeRonText(raw);    
-          } else {    
-            const httpRes = await ronAPI.chatWithRon(text, token);    
-            if (httpRes?.error) throw new Error(httpRes.error);    
-            ronText = sanitizeRonText(    
-              typeof httpRes === 'string'    
-                ? httpRes    
-                : (httpRes?.reply ?? httpRes?.ron ?? httpRes?.user_response ?? httpRes?.message ?? '')    
-            );    
-          }    
-        } else {    
-          const httpRes = await ronAPI.chatWithRon(text, token);    
-          if (httpRes?.error) throw new Error(httpRes.error);    
-          ronText = sanitizeRonText(    
-            typeof httpRes === 'string'    
-              ? httpRes    
-              : (httpRes?.reply ?? httpRes?.ron ?? httpRes?.user_response ?? httpRes?.message ?? '')    
-          );    
-        }    
-    
-        const cleaned = sanitizeRonText(ronText);    
-        updateBotBubble(botId, cleaned);    
-    
-        if (!cleaned || !cleaned.trim()) {    
-          await new Promise(r => setTimeout(r, 250));    
-          const fromHist1 = await fetchLastRonFromHistory();    
-          if (fromHist1 && fromHist1.trim()) {    
-            updateBotBubble(botId, fromHist1);    
-          } else {    
-            await new Promise(r => setTimeout(r, 400));    
-            const fromHist2 = await fetchLastRonFromHistory();    
-            updateBotBubble(botId, fromHist2);    
-          }    
-        }    
-    
-        setLoading(false);    
-        isSubmittingRef.current = false;    
-      }    
+      if (!streamingSupported) {
+        let ronText = '';
+
+        // ⚙️ 1) Intento vía Electron (modo app de escritorio)
+        if (window?.electronAPI?.askRon) {
+          const res = await window.electronAPI.askRon({ text });
+
+          if (res?.ok) {
+            // La API de Electron debería reenviarnos lo mismo que el proxy:
+            // { user_response, ron, commands, shutdown, ... }
+            const raw =
+              res.user_response ??
+              res.ron ??
+              (typeof res.text === 'string' ? res.text : '') ??
+              '';
+
+            ronText = sanitizeRonText(raw);
+          } else {
+            // Fallback HTTP si Electron falla
+            const httpRes = await ronAPI.chatWithRon(text, token);
+            if (httpRes?.error) throw new Error(httpRes.error);
+
+            const raw =
+              typeof httpRes === 'string'
+                ? httpRes
+                : (httpRes.user_response ??
+                   httpRes.ron ??
+                   httpRes.reply ??
+                   httpRes.message ??
+                   '');
+
+            ronText = sanitizeRonText(raw);
+          }
+        } else {
+          // ⚙️ 2) Modo web puro: siempre vía HTTP
+          const httpRes = await ronAPI.chatWithRon(text, token);
+          if (httpRes?.error) throw new Error(httpRes.error);
+
+          const raw =
+            typeof httpRes === 'string'
+              ? httpRes
+              : (httpRes.user_response ??
+                 httpRes.ron ??
+                 httpRes.reply ??
+                 httpRes.message ??
+                 '');
+
+          ronText = sanitizeRonText(raw);
+        }
+
+        // Ya viene sanitizado una sola vez
+        const cleaned = ronText || '';
+
+        updateBotBubble(botId, cleaned || '');    
+
+        // Ya no necesitamos hacer trucos con historial:
+        // el backend ahora siempre devuelve un user_response coherente.
+        setLoading(false);
+        isSubmittingRef.current = false;
+      }
+
+
     } catch (err) {    
       console.error('Error:', err);    
       const msg = String(err?.message || '');    

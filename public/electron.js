@@ -14,19 +14,16 @@ function runBackgroundTask(task, username = 'default') {
   if (!task || !taskManager) return;
 
   // 🔹 Normalizar tipo de tarea: alias analyze_local_file → analyze_file
-  let action = task.kind || '';        // p.ej. "analyze_file", "diagnose_system_performance"
-  if (action === 'analyze_local_file') {
-    action = 'analyze_file';
-  }
+let action = task.kind || '';
+let params = { ...(task.params || {}) };
 
-  let params = { ...(task.params || {}) };
-
-  // Compatibilidad: si es analyze_file y vino "path" en lugar de "file_path"
-  if (action === 'analyze_file') {
-    if (params.path && !params.file_path) {
-      params.file_path = params.path;
-    }
+// Alias: las tareas vienen como "analyze_file" pero el comando real es "analyze_local_file"
+if (action === 'analyze_file') {
+  if (params.path && !params.file_path) {
+    params.file_path = params.path;
   }
+  action = 'analyze_local_file';
+}
 
   // Si la tarea es de archivo, comprobamos existencia si hay file_path o path
   const filePath = params.file_path || params.path;
@@ -72,32 +69,46 @@ sys.path.insert(0, r"${path.join(pythonScriptsDir, 'core')}")
 
 from core.commands import run_command
 
-payload_json = os.environ.get("RON_TASK_PAYLOAD", "{}")
-username = os.environ.get("RON_TASK_USERNAME", "default")
+commands = json.loads('${commandsJson}')
 
-try:
-    payload = json.loads(payload_json)
-    action = payload.get("action")
-    params = payload.get("params") or {}
-    if not action:
-        raise ValueError("No se especificó acción para la tarea")
+results = []
+for cmd in commands:
+    action = cmd.get('action', '')
+    params = cmd.get('params', {})
+    if action:
+        try:
+            result = run_command(action, params, {'username': '${username}'})
+            ok = result.get('ok', True) if isinstance(result, dict) else True
+            msg = None
+            err = None
 
-    result = run_command(action, params, {"username": username})
+            if isinstance(result, dict):
+                msg = result.get('message')
+                err = result.get('error')
+            if not msg and err:
+                msg = err
+            if msg is None:
+                msg = str(result)
 
-    if isinstance(result, dict):
-        summary = (
-            result.get("message")
-            or result.get("summary")
-            or json.dumps(result, ensure_ascii=False)
-        )
-    else:
-        summary = str(result)
+            item = {
+                'action': action,
+                'ok': ok,
+                'message': msg,
+            }
+            if err:
+                item['error'] = err
 
-    out = {"ok": True, "summary": summary}
-except Exception as e:
-    out = {"ok": False, "error": str(e)}
+            results.append(item)
+        except Exception as e:
+            results.append({
+                'action': action,
+                'ok': False,
+                'error': str(e),
+                'message': str(e),
+            })
 
-print(json.dumps(out, ensure_ascii=False))
+print(json.dumps(results, ensure_ascii=False))
+
 `;
 
   const pythonProcess = spawn('python', ['-u', '-c', pythonCode], {
@@ -465,7 +476,15 @@ safeHandle("tasks:cancel", async (_e, id) => {
 });
 
 
-
+//-------------- botón de Actualización ------------
+safeHandle('python:update-scripts', async () => {
+  try {
+    const { baseDir } = await downloadPythonFiles();
+    return { ok: true, baseDir };
+  } catch (err) {
+    return { ok: false, error: String(err) };
+  }
+});
 
 
 
@@ -598,6 +617,7 @@ safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) =
     const decoder = new TextDecoder();  
     let buffer = '';  
     let receivedCommands = null;  
+    let hasAnyChunk = false;
   
     while (true) {  
       const { done, value } = await reader.read();  
@@ -621,6 +641,7 @@ safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) =
 
           // 🔹 Texto en trozos (type=chunk) — streaming real
           if (data.type === 'chunk' && data.chunk) {
+            hasAnyChunk = true;
             mainWindow?.webContents.send('stream-chunk', data.chunk);
             continue;
           }
@@ -638,13 +659,14 @@ safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) =
           }  
 
           // 🔹 FIN: type=done o data.done == true
-          if (data.type === 'done' || data.done) {    
-            // Texto final si viene
-            if (data.full_text) {  
-              mainWindow?.webContents.send('stream-chunk', data.full_text);  
-            }  
+          if (data.type === 'done' || data.done) {
+            // 🔹 Solo mandamos full_text si *no* se mandó ningún chunk antes.
+            //    Esto evita duplicar el texto completo.
+            if (!hasAnyChunk && data.full_text) {
+              mainWindow?.webContents.send('stream-chunk', data.full_text);
+            }
 
-            // ---- NUEVO: procesar comandos (queue_local_task + resto) ----
+            // ---- procesar comandos (queue_local_task + resto) ----
             if (Array.isArray(receivedCommands) && receivedCommands.length > 0) {    
               const pythonCommands = [];
 
@@ -655,13 +677,11 @@ safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) =
                   const { task_type, description, path, params } = cmd.params || {};
 
                   if (taskManager) {
-                    // 🔹 Normalizar tipo de tarea: alias analyze_local_file → analyze_file
                     let kind = task_type || 'generic_task';
                     if (kind === 'analyze_local_file') {
                       kind = 'analyze_file';
                     }
 
-                    // Mezclar params genéricos + path (para compatibilidad)
                     const taskParams = (params && typeof params === 'object') ? { ...params } : {};
                     if (path && !taskParams.path) {
                       taskParams.path = path;
@@ -675,7 +695,6 @@ safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) =
                     });
                     console.log('[TaskManager] Nueva tarea:', task.id, task.description);
 
-                    // 🔹 Lanzar ejecución genérica en segundo plano
                     try {
                       runBackgroundTask(task, username);
                     } catch (e) {
@@ -689,27 +708,25 @@ safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) =
                   } else {
                     console.warn('[TaskManager] queue_local_task recibido pero taskManager no está inicializado');
                   }
-                  continue; // NO enviar este comando al bloque Python genérico
+                  continue;
                 }
 
-                // Otros comandos síncronos siguen yendo por aquí
                 pythonCommands.push(cmd);
               }
-              // 2) Ejecutar SOLO los comandos que no eran queue_local_task
+
               if (pythonCommands.length > 0) {
-                console.log(`[ask-ron-stream] Ejecutando ${pythonCommands.length} comando(s) vía Python`);    
-                  
-                try {    
+                console.log(`[ask-ron-stream] Ejecutando ${pythonCommands.length} comando(s) vía Python`);
+
+                try {
                   const pythonScriptsDir = app.isPackaged    
                     ? path.join(app.getPath('userData'), 'python-scripts')    
-                    : path.join(process.cwd(), 'python-scripts');    
-                    
-// Antes de construir pythonCode:
-const commandsJson = JSON.stringify(pythonCommands)
-  .replace(/\\/g, '\\\\')  // escapar backslashes
-  .replace(/'/g, "\\'");   // escapar comillas simples
+                    : path.join(process.cwd(), 'python-scripts');
 
-const pythonCode = `\
+                  const commandsJson = JSON.stringify(pythonCommands)
+                    .replace(/\\/g, '\\\\')
+                    .replace(/'/g, "\\'");
+
+                  const pythonCode = `\
 import sys
 import os
 import json
@@ -719,7 +736,7 @@ sys.path.insert(0, r"${path.join(pythonScriptsDir, 'core')}")
 
 from core.commands import run_command
 
-# JSON -> lista de comandos Python
+
 commands = json.loads('${commandsJson}')
 
 results = []
@@ -729,21 +746,39 @@ for cmd in commands:
     if action:
         try:
             result = run_command(action, params, {'username': '${username}'})
-            results.append({
+            ok = result.get('ok', True) if isinstance(result, dict) else True
+            msg = None
+            err = None
+
+            if isinstance(result, dict):
+                msg = result.get('message')
+                err = result.get('error')
+            if not msg and err:
+                msg = err
+            if msg is None:
+                msg = str(result)
+
+            item = {
                 'action': action,
-                'ok': result.get('ok', True),
-                'message': result.get('message', str(result))
-            })
+                'ok': ok,
+                'message': msg,
+            }
+            if err:
+                item['error'] = err
+
+            results.append(item)
         except Exception as e:
             results.append({
                 'action': action,
                 'ok': False,
-                'error': str(e)
+                'error': str(e),
+                'message': str(e),
             })
+
 
 print(json.dumps(results, ensure_ascii=False))
 `;
-                  
+
                   await new Promise((resolve) => {    
                     const pythonProcess = spawn('python', ['-u', '-c', pythonCode], {    
                       cwd: pythonScriptsDir,    
@@ -794,11 +829,12 @@ print(json.dumps(results, ensure_ascii=False))
                   console.error('[ask-ron-stream] Error ejecutando comandos:', e);    
                 }    
               }
-            }  
-              
-            mainWindow?.webContents.send('stream-done');    
-            return { ok: true, streaming: true };    
-          }    
+            }
+
+            mainWindow?.webContents.send('stream-done');
+            return { ok: true, streaming: true };
+          }
+
           
           // Formato antiguo: solo chunk sin type
           if (data.chunk && !data.type) {    
@@ -1015,30 +1051,26 @@ safeHandle('ron:req', async (_evt, { path: subpath = '/', method = 'GET', header
 });  
   
 // --------- Ciclo de vida de la aplicación ----------  
-const gotLock = app.requestSingleInstanceLock();  
-if (!gotLock) {  
-  app.quit();  
-} else {  
-  app.on('second-instance', () => {  
-    if (mainWindow) {  
-      if (mainWindow.isMinimized()) mainWindow.restore();  
-      mainWindow.focus();  
-    }  
-  });  
-  app.whenReady().then(createWindow);  
-}  
-  
-app.on('window-all-closed', () => {  
-  if (ronPythonProcess) ronPythonProcess.kill();  
-  if (process.platform !== 'darwin') app.quit();  
-});  
-  
-app.on('activate', () => {  
-  if (BrowserWindow.getAllWindows().length === 0) createWindow();  
-});  
-  
-app.on('before-quit', () => {  
-  if (ronPythonProcess && !ronPythonProcess.killed) {  
-    ronPythonProcess.kill('SIGTERM');  
-  }  
-});
+const gotLock = app.requestSingleInstanceLock();
+if (!gotLock) {
+  app.quit();
+} else {
+  app.on('second-instance', () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      mainWindow.focus();
+    }
+  });
+
+  app.whenReady().then(async () => {
+    try {
+      // 🔹 Descargar/actualizar scripts al inicio (sin necesidad de abrir Ron 24/7)
+      await downloadPythonFiles();
+    } catch (err) {
+      console.warn('⚠️ No se pudieron actualizar los scripts Python al inicio:', err);
+      // aquí se usará el fallback local si existe
+    }
+
+    createWindow();
+  });
+}

@@ -23,10 +23,10 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('tasks:updated', handler);
   },
 
-  // 🔹 NUEVO: mensaje cuando una tarea de fondo termina con éxito
+  // 🔹 NUEVO: mensaje cuando una tarea de fondo termina con éxito / error
   onTaskCompletedMessage: (cb) => {
     if (typeof cb !== 'function') return () => {};
-    const handler = (_e, data) => cb(data); // { id, action, summary }
+    const handler = (_e, data) => cb(data); // { id, action, summary, ok?, error? }
     ipcRenderer.on('task-completed-message', handler);
     return () => ipcRenderer.removeListener('task-completed-message', handler);
   },
@@ -107,7 +107,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     return () => ipcRenderer.removeListener('stream-error', handler);
   },
 
-  // (opcional) resultados de comandos síncronos
+  // (opcional) resultados de comandos síncronos (list_files, delete_file, etc.)
   onCommandResults: (callback) => {
     if (typeof callback !== 'function') return () => {};
     const handler = (_e, results) => callback(results);

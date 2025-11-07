@@ -148,6 +148,37 @@ const Chat = () => {
     if (token) loadConversations();    
   }, [token]);    
     
+  // 🔹 Escuchar cuando una tarea de fondo termina y mandar el resumen al chat
+  useEffect(() => {
+    if (!window?.electronAPI?.onTaskCompletedMessage) return;
+
+    const unsubscribe = window.electronAPI.onTaskCompletedMessage(
+      ({ id, action, summary }) => {
+        if (!summary) return;
+
+        const text = sanitizeRonText(summary);
+
+        const taskMessage = {
+          id: `task-${id}-${Date.now()}`,
+          text,
+          sender: 'ron',
+          timestamp: new Date().toISOString(),
+        };
+
+        // Añadimos el mensaje de Ron al final del chat
+        setMessages((prev) => [...prev, taskMessage]);
+      }
+    );
+
+    // cleanup al desmontar
+    return () => {
+      if (typeof unsubscribe === 'function') {
+        unsubscribe();
+      }
+    };
+  }, []);
+
+
   const handleSubmit = async (e) => {    
     if (e && typeof e.preventDefault === 'function') {    
       e.preventDefault();    

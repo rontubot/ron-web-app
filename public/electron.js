@@ -9,11 +9,16 @@ const { TaskManager } = require("./taskManager");
 let taskManager; // instancia global
 const taskProcesses = new Map(); // taskId -> child_process
 
-// Ejecuta una tarea local en segundo plano (por ahora: analyze_local_file)
+// Ejecuta una tarea local en segundo plano (por ahora: analyze_file)
 function runBackgroundTask(task, username = 'default') {
   if (!task || !taskManager) return;
 
-  const action = task.kind;           // p.ej. "analyze_file", "diagnose_system_performance"
+  // 🔹 Normalizar tipo de tarea: alias analyze_local_file → analyze_file
+  let action = task.kind || '';        // p.ej. "analyze_file", "diagnose_system_performance"
+  if (action === 'analyze_local_file') {
+    action = 'analyze_file';
+  }
+
   let params = { ...(task.params || {}) };
 
   // Compatibilidad: si es analyze_file y vino "path" en lugar de "file_path"
@@ -170,7 +175,6 @@ print(json.dumps(out, ensure_ascii=False))
       error: String(err),
     });
   });
-
 }
 
 // >>> PATCH (arriba):
@@ -651,6 +655,12 @@ safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) =
                   const { task_type, description, path, params } = cmd.params || {};
 
                   if (taskManager) {
+                    // 🔹 Normalizar tipo de tarea: alias analyze_local_file → analyze_file
+                    let kind = task_type || 'generic_task';
+                    if (kind === 'analyze_local_file') {
+                      kind = 'analyze_file';
+                    }
+
                     // Mezclar params genéricos + path (para compatibilidad)
                     const taskParams = (params && typeof params === 'object') ? { ...params } : {};
                     if (path && !taskParams.path) {
@@ -658,7 +668,7 @@ safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) =
                     }
 
                     const task = taskManager.createTask({
-                      kind: task_type || 'generic_task',
+                      kind,
                       description: description || 'Tarea en segundo plano',
                       params: taskParams,
                       source: 'local',
@@ -694,7 +704,12 @@ safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) =
                     ? path.join(app.getPath('userData'), 'python-scripts')    
                     : path.join(process.cwd(), 'python-scripts');    
                     
-                  const pythonCode = `\
+// Antes de construir pythonCode:
+const commandsJson = JSON.stringify(pythonCommands)
+  .replace(/\\/g, '\\\\')  // escapar backslashes
+  .replace(/'/g, "\\'");   // escapar comillas simples
+
+const pythonCode = `\
 import sys
 import os
 import json
@@ -704,7 +719,8 @@ sys.path.insert(0, r"${path.join(pythonScriptsDir, 'core')}")
 
 from core.commands import run_command
 
-commands = ${JSON.stringify(pythonCommands)}
+# JSON -> lista de comandos Python
+commands = json.loads('${commandsJson}')
 
 results = []
 for cmd in commands:
@@ -726,7 +742,7 @@ for cmd in commands:
             })
 
 print(json.dumps(results, ensure_ascii=False))
-`;  
+`;
                   
                   await new Promise((resolve) => {    
                     const pythonProcess = spawn('python', ['-u', '-c', pythonCode], {    

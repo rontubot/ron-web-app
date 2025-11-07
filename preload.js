@@ -15,12 +15,20 @@ contextBridge.exposeInMainWorld('electronAPI', {
   // cancelar una tarea en curso (con confirmación en el front)
   cancelTask: (id) => ipcRenderer.invoke('tasks:cancel', id),
 
-  // suscripción a cambios de tareas
+  // suscripción a cambios de tareas (lista completa / actualizaciones)
   onTaskUpdated: (cb) => {
     if (typeof cb !== 'function') return () => {};
     const handler = (_e, payload) => cb(payload);
     ipcRenderer.on('tasks:updated', handler);
     return () => ipcRenderer.removeListener('tasks:updated', handler);
+  },
+
+  // 🔹 NUEVO: mensaje cuando una tarea de fondo termina con éxito
+  onTaskCompletedMessage: (cb) => {
+    if (typeof cb !== 'function') return () => {};
+    const handler = (_e, data) => cb(data); // { id, action, summary }
+    ipcRenderer.on('task-completed-message', handler);
+    return () => ipcRenderer.removeListener('task-completed-message', handler);
   },
 
   // ====== Auth / Config hacia proceso main ======
@@ -90,7 +98,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
     const handler = (_e) => callback();
     ipcRenderer.on('stream-done', handler);
     return () => ipcRenderer.removeListener('stream-done', handler);
-  },  
+  },
 
   onStreamError: (callback) => {
     if (typeof callback !== 'function') return () => {};

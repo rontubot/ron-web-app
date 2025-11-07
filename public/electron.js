@@ -5,8 +5,173 @@ const { spawn } = require('child_process');
 const net = require('net');  
 const fs = require('fs').promises;  
 const fs2 = require('fs');  
+const { TaskManager } = require("./taskManager");
+let taskManager; // instancia global
+const taskProcesses = new Map(); // taskId -> child_process
 
+// Ejecuta una tarea local en segundo plano (por ahora: analyze_local_file)
+function runBackgroundTask(task, username = 'default') {
+  if (!task || !taskManager) return;
 
+  const action = task.kind;           // p.ej. "analyze_file", "diagnose_system_performance"
+  let params = { ...(task.params || {}) };
+
+  // Compatibilidad: si es analyze_file y vino "path" en lugar de "file_path"
+  if (action === 'analyze_file') {
+    if (params.path && !params.file_path) {
+      params.file_path = params.path;
+    }
+  }
+
+  // Si la tarea es de archivo, comprobamos existencia si hay file_path o path
+  const filePath = params.file_path || params.path;
+  if (filePath && !fs2.existsSync(filePath)) {
+    console.warn('[TaskManager] Archivo no encontrado para tarea', task.id, filePath);
+    taskManager.updateTask(task.id, {
+      status: 'failed',
+      progress: 0,
+      error: `No se encontró el archivo: ${filePath}`,
+    });
+    return;
+  }
+
+  // Pasamos a RUNNING
+  taskManager.updateTask(task.id, {
+    status: 'running',
+    progress: 5,
+  });
+
+  const pythonScriptsDir = app.isPackaged
+    ? path.join(app.getPath('userData'), 'python-scripts')
+    : path.join(process.cwd(), 'python-scripts');
+
+  const payload = { action, params };
+
+  const env = {
+    ...process.env,
+    PYTHONIOENCODING: 'utf-8',
+    RON_API_URL: API_URL,
+    RON_AUTH_TOKEN: AUTH_TOKEN || '',
+    RON_TASK_USERNAME: username || 'default',
+    // JSON con acción + params
+    RON_TASK_PAYLOAD: JSON.stringify(payload),
+  };
+
+  const pythonCode = `\
+import sys
+import os
+import json
+
+sys.path.insert(0, r"${pythonScriptsDir}")
+sys.path.insert(0, r"${path.join(pythonScriptsDir, 'core')}")
+
+from core.commands import run_command
+
+payload_json = os.environ.get("RON_TASK_PAYLOAD", "{}")
+username = os.environ.get("RON_TASK_USERNAME", "default")
+
+try:
+    payload = json.loads(payload_json)
+    action = payload.get("action")
+    params = payload.get("params") or {}
+    if not action:
+        raise ValueError("No se especificó acción para la tarea")
+
+    result = run_command(action, params, {"username": username})
+
+    if isinstance(result, dict):
+        summary = (
+            result.get("message")
+            or result.get("summary")
+            or json.dumps(result, ensure_ascii=False)
+        )
+    else:
+        summary = str(result)
+
+    out = {"ok": True, "summary": summary}
+except Exception as e:
+    out = {"ok": False, "error": str(e)}
+
+print(json.dumps(out, ensure_ascii=False))
+`;
+
+  const pythonProcess = spawn('python', ['-u', '-c', pythonCode], {
+    cwd: pythonScriptsDir,
+    env,
+  });
+
+  // 👇 guardamos el proceso para poder cancelarlo después
+  taskProcesses.set(task.id, pythonProcess);
+
+  let output = '';
+  let errorOutput = '';
+
+  pythonProcess.stdout.on('data', (data) => {
+    output += data.toString();
+  });
+
+  pythonProcess.stderr.on('data', (data) => {
+    const text = data.toString();
+    errorOutput += text;
+    console.log('[TaskManager Python stderr]', text);
+  });
+
+  pythonProcess.on('close', (code) => {
+    taskProcesses.delete(task.id);
+    if (!taskManager) return;
+
+    // si el usuario la marcó como cancelada, no sobreescribimos el estado
+    const current = taskManager.getTask(task.id);
+    if (!current || current.status === 'cancelled') {
+      return;
+    }
+
+    if (code === 0 && output) {
+      try {
+        const payload = JSON.parse(output);
+        if (payload.ok) {
+          taskManager.updateTask(task.id, {
+            status: 'completed',
+            progress: 100,
+            result_summary: payload.summary || 'Tarea completada.',
+            error: null,
+          });
+        } else {
+          taskManager.updateTask(task.id, {
+            status: 'failed',
+            progress: 100,
+            error: payload.error || 'Error desconocido en la tarea.',
+          });
+        }
+      } catch (e) {
+        console.error('[TaskManager] Error parseando output de tarea:', e);
+        taskManager.updateTask(task.id, {
+          status: 'failed',
+          progress: 100,
+          error: 'Error al interpretar el resultado de la tarea.',
+        });
+      }
+    } else {
+      taskManager.updateTask(task.id, {
+        status: 'failed',
+        progress: 100,
+        error: errorOutput || `Proceso Python terminó con código ${code}`,
+      });
+    }
+  });
+
+  pythonProcess.on('error', (err) => {
+    console.error('[TaskManager] Error ejecutando Python para tarea:', err);
+    taskProcesses.delete(task.id);
+    if (!taskManager) return;
+    taskManager.updateTask(task.id, {
+      status: 'failed',
+      progress: 0,
+      error: String(err),
+    });
+  });
+
+}
 
 // >>> PATCH (arriba):
 const { TextDecoder } = require('util');
@@ -198,7 +363,9 @@ function createWindow() {
       preload: preloadPath,  
     },  
   });  
-  
+  // 🔹 Instanciar TaskManager con la ventana principal
+  taskManager = new TaskManager(mainWindow);
+
   const startUrl = isDev  
     ? 'http://localhost:3000'  
     : `file://${path.join(__dirname, '../build/index.html')}`;  
@@ -208,7 +375,8 @@ function createWindow() {
   
   mainWindow.on('closed', () => {  
     if (ronPythonProcess) ronPythonProcess.kill();  
-    mainWindow = null;  
+    mainWindow = null;
+    taskManager = null;
   });  
   
   mainWindow.webContents.on('did-fail-load', (e, code, desc, url, isMainFrame) => {  
@@ -251,6 +419,52 @@ async function sendCommandToRon(command) {
     return await tryConnect('localhost');  
   }  
 }  
+
+
+// --------- multitasks ---------- 
+safeHandle("tasks:clear-completed", async () => {
+  if (!taskManager) return { ok: false, message: "TaskManager no inicializado" };
+  const cleared = taskManager.clearCompleted();
+  return { ok: true, cleared };
+});
+
+safeHandle("tasks:delete", async (_e, id) => {
+  if (!taskManager || !id) return { ok: false };
+
+  const proc = taskProcesses.get(id);
+  if (proc && !proc.killed) {
+    try { proc.kill('SIGTERM'); } catch (_) {}
+    taskProcesses.delete(id);
+  }
+
+  const deleted = taskManager.deleteTask(id);
+  return { ok: deleted };
+});
+
+safeHandle("tasks:cancel", async (_e, id) => {
+  if (!taskManager || !id) return { ok: false };
+  const t = taskManager.getTask(id);
+  if (!t) return { ok: false };
+
+  // marcamos como cancelada
+  taskManager.updateTask(id, {
+    status: 'cancelled',
+  });
+
+  const proc = taskProcesses.get(id);
+  if (proc && !proc.killed) {
+    try { proc.kill('SIGTERM'); } catch (_) {}
+    taskProcesses.delete(id);
+  }
+
+  return { ok: true };
+});
+
+
+
+
+
+
   
 // --------- Handlers IPC ----------  
 safeHandle('auth:set-token', async (_evt, token) => {  
@@ -287,6 +501,19 @@ safeHandle('auth:set-api-base', async (_evt, url) => {
     }
   }
   return { ok: true, base: API_URL };
+});
+
+
+
+safeHandle('tasks:list', async () => {
+  // Por si acaso se llama antes de que exista el TaskManager
+  if (!taskManager) return [];
+  return taskManager.getTasks();
+});
+
+safeHandle('tasks:get', async (_e, id) => {
+  if (!taskManager) return null;
+  return taskManager.getTask(id);
 });
 
 
@@ -382,41 +609,92 @@ safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) =
         try {    
           const data = JSON.parse(line.slice(6));    
           
-          // PROGRESO: type=progress + chunk
+          // 🔹 Texto de progreso (type=progress + chunk)
           if (data.type === 'progress' && data.chunk) {    
             mainWindow?.webContents.send('stream-chunk', data.chunk);    
-            continue; // no procesar nada más en este evento    
+            continue;    
           }    
+
+          // 🔹 Texto en trozos (type=chunk) — streaming real
+          if (data.type === 'chunk' && data.chunk) {
+            mainWindow?.webContents.send('stream-chunk', data.chunk);
+            continue;
+          }
 
           // Guardar comandos si vienen en cualquier evento
           if (Array.isArray(data.commands) && data.commands.length > 0) {    
             receivedCommands = data.commands;    
           }  
 
-          // ERROR: type=error o campo error
+          // 🔹 Error explícito
           if (data.type === 'error' || data.error) {    
             const errMsg = data.error || 'Error en streaming';  
             mainWindow?.webContents.send('stream-error', errMsg);    
             return { ok: false, error: errMsg };    
           }  
 
-          // FIN: type=done o data.done == true
+          // 🔹 FIN: type=done o data.done == true
           if (data.type === 'done' || data.done) {    
-            // texto final si viene
+            // Texto final si viene
             if (data.full_text) {  
               mainWindow?.webContents.send('stream-chunk', data.full_text);  
             }  
 
-            // Ejecutar comandos UNA sola vez al final
+            // ---- NUEVO: procesar comandos (queue_local_task + resto) ----
             if (Array.isArray(receivedCommands) && receivedCommands.length > 0) {    
-              console.log(`[ask-ron-stream] Ejecutando ${receivedCommands.length} comando(s) vía Python`);    
-                
-              try {    
-                const pythonScriptsDir = app.isPackaged    
-                  ? path.join(app.getPath('userData'), 'python-scripts')    
-                  : path.join(process.cwd(), 'python-scripts');    
+              const pythonCommands = [];
+
+              for (const cmd of receivedCommands) {
+                if (!cmd || !cmd.action) continue;
+
+                if (cmd.action === 'queue_local_task') {
+                  const { task_type, description, path, params } = cmd.params || {};
+
+                  if (taskManager) {
+                    // Mezclar params genéricos + path (para compatibilidad)
+                    const taskParams = (params && typeof params === 'object') ? { ...params } : {};
+                    if (path && !taskParams.path) {
+                      taskParams.path = path;
+                    }
+
+                    const task = taskManager.createTask({
+                      kind: task_type || 'generic_task',
+                      description: description || 'Tarea en segundo plano',
+                      params: taskParams,
+                      source: 'local',
+                    });
+                    console.log('[TaskManager] Nueva tarea:', task.id, task.description);
+
+                    // 🔹 Lanzar ejecución genérica en segundo plano
+                    try {
+                      runBackgroundTask(task, username);
+                    } catch (e) {
+                      console.error('[TaskManager] Error iniciando ejecución de tarea:', e);
+                      taskManager.updateTask(task.id, {
+                        status: 'failed',
+                        progress: 0,
+                        error: String(e),
+                      });
+                    }
+                  } else {
+                    console.warn('[TaskManager] queue_local_task recibido pero taskManager no está inicializado');
+                  }
+                  continue; // NO enviar este comando al bloque Python genérico
+                }
+
+                // Otros comandos síncronos siguen yendo por aquí
+                pythonCommands.push(cmd);
+              }
+              // 2) Ejecutar SOLO los comandos que no eran queue_local_task
+              if (pythonCommands.length > 0) {
+                console.log(`[ask-ron-stream] Ejecutando ${pythonCommands.length} comando(s) vía Python`);    
                   
-                const pythonCode = `\
+                try {    
+                  const pythonScriptsDir = app.isPackaged    
+                    ? path.join(app.getPath('userData'), 'python-scripts')    
+                    : path.join(process.cwd(), 'python-scripts');    
+                    
+                  const pythonCode = `\
 import sys
 import os
 import json
@@ -426,7 +704,7 @@ sys.path.insert(0, r"${path.join(pythonScriptsDir, 'core')}")
 
 from core.commands import run_command
 
-commands = ${JSON.stringify(receivedCommands)}
+commands = ${JSON.stringify(pythonCommands)}
 
 results = []
 for cmd in commands:
@@ -449,63 +727,64 @@ for cmd in commands:
 
 print(json.dumps(results, ensure_ascii=False))
 `;  
-                
-                await new Promise((resolve) => {    
-                  const pythonProcess = spawn('python', ['-u', '-c', pythonCode], {    
-                    cwd: pythonScriptsDir,    
-                    env: { 
-                      ...process.env, 
-                      PYTHONIOENCODING: 'utf-8',
-                      RON_API_URL: API_URL,
-                      RON_AUTH_TOKEN: AUTH_TOKEN || '',
-                    },    
-                  });    
-                    
-                  let output = '';    
-                  let errorOutput = '';    
-                    
-                  pythonProcess.stdout.on('data', (data) => {    
-                    output += data.toString();    
-                  });    
-                    
-                  pythonProcess.stderr.on('data', (data) => {    
-                    errorOutput += data.toString();    
-                    console.log('[Python stderr]:', data.toString());    
-                  });    
-                    
-                  pythonProcess.on('close', (code) => {    
-                    if (code === 0 && output) {    
-                      try {    
-                        const results = JSON.parse(output);    
-                        console.log('[ask-ron-stream] Resultados:', results);    
-                        mainWindow?.webContents.send('command-results', results);    
-                        const successCount = results.filter(r => r.ok).length;    
-                        console.log(`✅ ${successCount} comando(s) ejecutado(s) exitosamente`);    
-                      } catch (e) {    
-                        console.error('[ask-ron-stream] Error parseando resultados:', e);    
-                      }    
-                    } else if (errorOutput) {    
-                      console.error('[ask-ron-stream] Python error output:', errorOutput);    
-                    }    
-                    resolve();    
-                  });    
-                    
-                  pythonProcess.on('error', (err) => {    
-                    console.error('[ask-ron-stream] Error ejecutando Python:', err);    
-                    resolve();    
-                  });    
-                });    
                   
-              } catch (e) {    
-                console.error('[ask-ron-stream] Error ejecutando comandos:', e);    
-              }    
+                  await new Promise((resolve) => {    
+                    const pythonProcess = spawn('python', ['-u', '-c', pythonCode], {    
+                      cwd: pythonScriptsDir,    
+                      env: { 
+                        ...process.env, 
+                        PYTHONIOENCODING: 'utf-8',
+                        RON_API_URL: API_URL,
+                        RON_AUTH_TOKEN: AUTH_TOKEN || '',
+                      },    
+                    });    
+                      
+                    let output = '';    
+                    let errorOutput = '';    
+                      
+                    pythonProcess.stdout.on('data', (data) => {    
+                      output += data.toString();    
+                    });    
+                      
+                    pythonProcess.stderr.on('data', (data) => {    
+                      errorOutput += data.toString();    
+                      console.log('[Python stderr]:', data.toString());    
+                    });    
+                      
+                    pythonProcess.on('close', (code) => {    
+                      if (code === 0 && output) {    
+                        try {    
+                          const results = JSON.parse(output);    
+                          console.log('[ask-ron-stream] Resultados:', results);    
+                          mainWindow?.webContents.send('command-results', results);    
+                          const successCount = results.filter(r => r.ok).length;    
+                          console.log(`✅ ${successCount} comando(s) ejecutado(s) exitosamente`);    
+                        } catch (e) {    
+                          console.error('[ask-ron-stream] Error parseando resultados:', e);    
+                        }    
+                      } else if (errorOutput) {    
+                        console.error('[ask-ron-stream] Python error output:', errorOutput);    
+                      }    
+                      resolve();    
+                    });    
+                      
+                    pythonProcess.on('error', (err) => {    
+                      console.error('[ask-ron-stream] Error ejecutando Python:', err);    
+                      resolve();    
+                    });    
+                  });    
+                    
+                } catch (e) {    
+                  console.error('[ask-ron-stream] Error ejecutando comandos:', e);    
+                }    
+              }
             }  
               
             mainWindow?.webContents.send('stream-done');    
             return { ok: true, streaming: true };    
           }    
           
-          // Formato antiguo: solo chunk
+          // Formato antiguo: solo chunk sin type
           if (data.chunk && !data.type) {    
             mainWindow?.webContents.send('stream-chunk', data.chunk);    
           }  
@@ -525,6 +804,7 @@ print(json.dumps(results, ensure_ascii=False))
     return await fallbackToNonStream();  
   }  
 });
+
 
 
   

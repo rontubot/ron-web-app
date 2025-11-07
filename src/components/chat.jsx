@@ -3,6 +3,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/authcontext';    
 import { ronAPI } from '../services/api';    
 import './chat.css';    
+import { TaskCenter } from './TaskCenter';
+
     
 const sanitizeRonText = (raw = '') => {    
   if (!raw || typeof raw !== 'string') return '';    
@@ -55,7 +57,8 @@ const Chat = () => {
   const [error, setError] = useState('');    
   const messagesEndRef = useRef(null);    
   const isSubmittingRef = useRef(false);    
-  const lastSubmitTimeRef = useRef(0);  
+  const lastSubmitTimeRef = useRef(0); 
+  const [showTasks, setShowTasks] = useState(false); 
     
   const { token, logout } = useAuth();    
     
@@ -296,6 +299,30 @@ const Chat = () => {
     
   return (    
     <div className="chat-container">    
+      {/* Barra superior con botón de tareas */}
+      <div className="chat-top-bar" style={{ 
+        display: 'flex',
+        justifyContent: 'flex-end',
+        padding: '4px 8px'
+      }}>
+        <button
+          type="button"
+          className="task-center-toggle"
+          onClick={() => setShowTasks((v) => !v)}
+          style={{
+            fontSize: '0.85rem',
+            borderRadius: '999px',
+            padding: '4px 10px',
+            border: '1px solid #444',
+            background: '#1b1b1b',
+            color: '#f5f5f5',
+            cursor: 'pointer'
+          }}
+        >
+          📋 Tareas
+        </button>
+      </div>
+
       <div className="messages-container">    
         {messages.length === 0 && !loading && !error ? (    
           <div className="welcome-message">    
@@ -359,7 +386,9 @@ const Chat = () => {
             {loading ? '⏳' : '📤'}    
           </button>    
         </div>    
-      </form>     
+      </form> 
+      {/* Panel de tareas en segundo plano */}
+      <TaskCenter open={showTasks} onClose={() => setShowTasks(false)} />
     </div>  
   );  
 };  

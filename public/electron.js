@@ -10,20 +10,20 @@ let taskManager; // instancia global
 const taskProcesses = new Map(); // taskId -> child_process
 
 // Ejecuta una tarea local en segundo plano (por ahora: analyze_file)
+// Ejecuta una tarea local en segundo plano (por ahora: analyze_file)
 function runBackgroundTask(task, username = 'default') {
   if (!task || !taskManager) return;
 
-  // 🔹 Normalizar tipo de tarea: alias analyze_local_file → analyze_file
-let action = task.kind || '';
-let params = { ...(task.params || {}) };
+  // 🔹 Normalizar tipo de tarea: alias analyze_file → analyze_local_file
+  let action = task.kind || '';
+  let params = { ...(task.params || {}) };
 
-// Alias: las tareas vienen como "analyze_file" pero el comando real es "analyze_local_file"
-if (action === 'analyze_file') {
-  if (params.path && !params.file_path) {
-    params.file_path = params.path;
+  if (action === 'analyze_file') {
+    if (params.path && !params.file_path) {
+      params.file_path = params.path;
+    }
+    action = 'analyze_local_file';
   }
-  action = 'analyze_local_file';
-}
 
   // Si la tarea es de archivo, comprobamos existencia si hay file_path o path
   const filePath = params.file_path || params.path;
@@ -47,17 +47,10 @@ if (action === 'analyze_file') {
     ? path.join(app.getPath('userData'), 'python-scripts')
     : path.join(process.cwd(), 'python-scripts');
 
-  const payload = { action, params };
-
-  const env = {
-    ...process.env,
-    PYTHONIOENCODING: 'utf-8',
-    RON_API_URL: API_URL,
-    RON_AUTH_TOKEN: AUTH_TOKEN || '',
-    RON_TASK_USERNAME: username || 'default',
-    // JSON con acción + params
-    RON_TASK_PAYLOAD: JSON.stringify(payload),
-  };
+  // Payload de la tarea para el lado Python
+  const taskPayloadJson = JSON.stringify({ action, params })
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'");
 
   const pythonCode = `\
 import sys
@@ -69,69 +62,77 @@ sys.path.insert(0, r"${path.join(pythonScriptsDir, 'core')}")
 
 from core.commands import run_command
 
-commands = json.loads('${commandsJson}')
+payload = json.loads('${taskPayloadJson}')
+action = payload.get('action')
+params = payload.get('params') or {}
 
-results = []
-for cmd in commands:
-    action = cmd.get('action', '')
-    params = cmd.get('params', {})
-    if action:
-        try:
-            result = run_command(action, params, {'username': '${username}'})
-            ok = result.get('ok', True) if isinstance(result, dict) else True
-            msg = None
-            err = None
+username = os.environ.get('RON_TASK_USERNAME', 'default')
+ctx = {'username': username}
 
-            if isinstance(result, dict):
-                msg = result.get('message')
-                err = result.get('error')
-            if not msg and err:
-                msg = err
-            if msg is None:
-                msg = str(result)
+result = run_command(action, params, ctx)
 
-            item = {
-                'action': action,
-                'ok': ok,
-                'message': msg,
-            }
-            if err:
-                item['error'] = err
+ok = True
+summary = ''
+error = ''
 
-            results.append(item)
-        except Exception as e:
-            results.append({
-                'action': action,
-                'ok': False,
-                'error': str(e),
-                'message': str(e),
-            })
+if isinstance(result, dict):
+    ok = bool(result.get('ok', True))
+    summary = (
+        result.get('message')
+        or result.get('summary')
+        or ''
+    )
+    error = result.get('error') or ''
+else:
+    summary = str(result)
 
-print(json.dumps(results, ensure_ascii=False))
-
+print(json.dumps({'ok': ok, 'summary': summary, 'error': error}, ensure_ascii=False))
 `;
 
+  const env = {
+    ...process.env,
+    PYTHONIOENCODING: 'utf-8',
+    RON_API_URL: API_URL,
+    RON_AUTH_TOKEN: AUTH_TOKEN || '',
+    RON_TASK_USERNAME: username || 'default',
+  };
+
+  // 🚀 Lanzar el proceso Python en background
   const pythonProcess = spawn('python', ['-u', '-c', pythonCode], {
     cwd: pythonScriptsDir,
     env,
   });
 
-  // 👇 guardamos el proceso para poder cancelarlo después
   taskProcesses.set(task.id, pythonProcess);
 
   let output = '';
   let errorOutput = '';
 
   pythonProcess.stdout.on('data', (data) => {
-    output += data.toString();
+    const txt = data.toString();
+    output += txt;
+    console.log('[TaskManager Python stdout]', txt);
   });
 
   pythonProcess.stderr.on('data', (data) => {
-    const text = data.toString();
-    errorOutput += text;
-    console.log('[TaskManager Python stderr]', text);
+    const txt = data.toString();
+    errorOutput += txt;
+    console.log('[TaskManager Python stderr]', txt);
   });
 
+  pythonProcess.on('error', (err) => {
+    console.error('[TaskManager] Error lanzando proceso Python:', err);
+    taskProcesses.delete(task.id);
+    if (!taskManager) return;
+
+    taskManager.updateTask(task.id, {
+      status: 'failed',
+      progress: 100,
+      error: String(err),
+    });
+  });
+
+  // 🔚 Cuando termina el proceso, marcamos la tarea y avisamos al renderer
   pythonProcess.on('close', (code) => {
     taskProcesses.delete(task.id);
     if (!taskManager) return;
@@ -142,51 +143,86 @@ print(json.dumps(results, ensure_ascii=False))
       return;
     }
 
+    let ok = false;
+    let summary = '';
+    let errorMsg = '';
+
     if (code === 0 && output) {
       try {
         const payload = JSON.parse(output);
         if (payload.ok) {
+          ok = true;
+          summary = payload.summary || 'Tarea completada.';
           taskManager.updateTask(task.id, {
             status: 'completed',
             progress: 100,
-            result_summary: payload.summary || 'Tarea completada.',
+            result_summary: summary,
             error: null,
           });
         } else {
+          ok = false;
+          errorMsg = payload.error || 'Error desconocido en la tarea.';
           taskManager.updateTask(task.id, {
             status: 'failed',
             progress: 100,
-            error: payload.error || 'Error desconocido en la tarea.',
+            error: errorMsg,
           });
         }
       } catch (e) {
         console.error('[TaskManager] Error parseando output de tarea:', e);
+        ok = false;
+        errorMsg = 'Error al interpretar el resultado de la tarea.';
         taskManager.updateTask(task.id, {
           status: 'failed',
           progress: 100,
-          error: 'Error al interpretar el resultado de la tarea.',
+          error: errorMsg,
         });
       }
     } else {
+      errorMsg = errorOutput || `Proceso Python terminó con código ${code}`;
       taskManager.updateTask(task.id, {
         status: 'failed',
         progress: 100,
-        error: errorOutput || `Proceso Python terminó con código ${code}`,
+        error: errorMsg,
       });
     }
-  });
 
-  pythonProcess.on('error', (err) => {
-    console.error('[TaskManager] Error ejecutando Python para tarea:', err);
-    taskProcesses.delete(task.id);
-    if (!taskManager) return;
-    taskManager.updateTask(task.id, {
-      status: 'failed',
-      progress: 0,
-      error: String(err),
-    });
+    if (summary && errorMsg && summary.trim() === errorMsg.trim()) {
+      errorMsg = ""; // evita duplicado si ambos dicen lo mismo
+    }
+
+
+
+    // 🔹 Enviar evento al renderer con el resultado final de la tarea
+    try {
+      mainWindow?.webContents.send('task-completed-message', {
+        id: task.id,
+        action,   // ← la acción normalizada (analyze_local_file, etc.)
+        ok,
+        summary,
+        error: errorMsg,
+      });
+    } catch (err) {
+      console.warn('[TaskManager] No se pudo enviar task-completed-message:', err);
+    }
+
+    // Si es un recordatorio y salió bien, avisar explícitamente al chat
+    if (ok && summary && (action === 'reminder_timer' || action === 'cmd_reminder_timer')) {
+      try {
+        mainWindow?.webContents.send('task-reminder-fired', {
+          id: task.id,
+          text: summary,
+          username,
+        });
+      } catch (err) {
+        console.warn('[TaskManager] No se pudo enviar task-reminder-fired:', err);
+      }
+    }
+    
   });
 }
+
+
 
 // >>> PATCH (arriba):
 const { TextDecoder } = require('util');
@@ -258,7 +294,8 @@ async function downloadPythonFiles() {
   }  
   
   const files = [    
-    { url: `${baseUrl}/local/ron_launcher.py`, path: path.join(baseDir, 'ron_launcher.py') },    
+    { url: `${baseUrl}/local/ron_launcher.py`, path: path.join(baseDir, 'ron_launcher.py') },  
+    { url: `${baseUrl}/local/python_command_bridge.py`, path: path.join(baseDir, 'python_command_bridge.py') },        
     { url: `${baseUrl}/core/assistant.py`,     path: path.join(baseDir, 'core', 'assistant.py') },    
     { url: `${baseUrl}/core/memory.py`,        path: path.join(baseDir, 'core', 'memory.py') },    
     { url: `${baseUrl}/core/commands.py`,      path: path.join(baseDir, 'core', 'commands.py') },    
@@ -722,65 +759,10 @@ safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) =
                     ? path.join(app.getPath('userData'), 'python-scripts')    
                     : path.join(process.cwd(), 'python-scripts');
 
-                  const commandsJson = JSON.stringify(pythonCommands)
-                    .replace(/\\/g, '\\\\')
-                    .replace(/'/g, "\\'");
-
-                  const pythonCode = `\
-import sys
-import os
-import json
-
-sys.path.insert(0, r"${pythonScriptsDir}")
-sys.path.insert(0, r"${path.join(pythonScriptsDir, 'core')}")
-
-from core.commands import run_command
-
-
-commands = json.loads('${commandsJson}')
-
-results = []
-for cmd in commands:
-    action = cmd.get('action', '')
-    params = cmd.get('params', {})
-    if action:
-        try:
-            result = run_command(action, params, {'username': '${username}'})
-            ok = result.get('ok', True) if isinstance(result, dict) else True
-            msg = None
-            err = None
-
-            if isinstance(result, dict):
-                msg = result.get('message')
-                err = result.get('error')
-            if not msg and err:
-                msg = err
-            if msg is None:
-                msg = str(result)
-
-            item = {
-                'action': action,
-                'ok': ok,
-                'message': msg,
-            }
-            if err:
-                item['error'] = err
-
-            results.append(item)
-        except Exception as e:
-            results.append({
-                'action': action,
-                'ok': False,
-                'error': str(e),
-                'message': str(e),
-            })
-
-
-print(json.dumps(results, ensure_ascii=False))
-`;
+                  const bridgePath = path.join(pythonScriptsDir, 'python_command_bridge.py');
 
                   await new Promise((resolve) => {    
-                    const pythonProcess = spawn('python', ['-u', '-c', pythonCode], {    
+                    const pythonProcess = spawn('python', ['-u', '-X', 'utf8', bridgePath], {    
                       cwd: pythonScriptsDir,    
                       env: { 
                         ...process.env, 
@@ -798,12 +780,13 @@ print(json.dumps(results, ensure_ascii=False))
                     });    
                       
                     pythonProcess.stderr.on('data', (data) => {    
-                      errorOutput += data.toString();    
-                      console.log('[Python stderr]:', data.toString());    
+                      const txt = data.toString();
+                      errorOutput += txt;    
+                      console.log('[Python stderr]:', txt);    
                     });    
                       
                     pythonProcess.on('close', (code) => {    
-                      if (code === 0 && output) {    
+                      if (code === 0 && output.trim()) {    
                         try {    
                           const results = JSON.parse(output);    
                           console.log('[ask-ron-stream] Resultados:', results);    
@@ -811,7 +794,7 @@ print(json.dumps(results, ensure_ascii=False))
                           const successCount = results.filter(r => r.ok).length;    
                           console.log(`✅ ${successCount} comando(s) ejecutado(s) exitosamente`);    
                         } catch (e) {    
-                          console.error('[ask-ron-stream] Error parseando resultados:', e);    
+                          console.error('[ask-ron-stream] Error parseando resultados del bridge:', e, 'output=', output);    
                         }    
                       } else if (errorOutput) {    
                         console.error('[ask-ron-stream] Python error output:', errorOutput);    
@@ -820,9 +803,22 @@ print(json.dumps(results, ensure_ascii=False))
                     });    
                       
                     pythonProcess.on('error', (err) => {    
-                      console.error('[ask-ron-stream] Error ejecutando Python:', err);    
+                      console.error('[ask-ron-stream] Error ejecutando Python bridge:', err);    
                       resolve();    
                     });    
+
+                    try {
+                      const payload = {
+                        username,
+                        commands: pythonCommands,
+                      };
+                      pythonProcess.stdin.write(JSON.stringify(payload), 'utf8');
+                      pythonProcess.stdin.end();
+                    } catch (e) {
+                      console.error('[ask-ron-stream] Error escribiendo en stdin del bridge:', e);
+                      try { pythonProcess.kill(); } catch {}
+                      resolve();
+                    }
                   });    
                     
                 } catch (e) {    
@@ -856,7 +852,6 @@ print(json.dumps(results, ensure_ascii=False))
     return await fallbackToNonStream();  
   }  
 });
-
 
 
   

@@ -12,7 +12,7 @@ const PORT = process.env.PORT || 3000;
 // Middleware básico  
 app.use(cors());  
 app.use(express.json({ limit: '10mb' })); 
-app.use((req, res, next) => {  
+app.use((req, res, next) => {   
   console.log('🔍 Raw body:', req.body);  
   console.log('🔍 Content-Type:', req.headers['content-type']);  
   next();  

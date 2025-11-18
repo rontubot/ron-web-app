@@ -24,35 +24,60 @@ const sanitizeRonText = (raw = '') => {
     }    
   } catch (e) {}    
     
+  // Normalizar saltos de línea escapados
   let text = raw.replace(/\\n/g, '\n');    
 
   // Quitar cualquier blob JSON que tenga user_response/commands,
   // aunque tenga saltos de línea o espacios raros
   text = text.replace(/\{"user_response"[\s\S]*?"commands":\[[\s\S]*?\]\}/g, '');    
   text = text.replace(/\{"action"[\s\S]*?"params":\{[\s\S]*?\}\}/g, '');    
-   
     
   const lines = text.split(/\r?\n/).map(l => l.trim());    
     
-  const isLog = (l) =>    
-    !l ||    
-    l.startsWith('📁') ||    
-    l.startsWith('[RON]') ||    
-    l.toLowerCase().startsWith('info:') ||    
-    l.toLowerCase().startsWith('debug:') ||    
-    l.toLowerCase().includes('archivo de memoria no encontrado') ||    
-    l.toLowerCase().includes('descargando') ||    
-    l.toLowerCase().includes('control server') ||    
-    l.toLowerCase().includes('ron 24/7') ||    
-    /^http(s)?:\/\//i.test(l);    
-    
+  const isLog = (l) =>
+    !l ||
+    l.startsWith('📁') ||
+    l.startsWith('📂') ||
+    l.startsWith('📊') ||
+    l.startsWith('✅') ||
+    l.startsWith('🔊') ||
+    l.startsWith('🔉') ||
+    l.startsWith('🔄') ||
+    l.startsWith('🧹') ||
+    l.startsWith('💿') ||
+    l.startsWith('🌐') ||
+    // Errores técnicos típicos de comandos de archivos
+    l.startsWith('⚠️ El archivo no existe:') ||
+    l.startsWith('⚠️ La ruta no es un archivo:') ||
+    l.startsWith('⚠️ La ruta no es un directorio válido:') ||
+    l.startsWith('⚠️ Directorio vacío') ||
+    l.toLowerCase().startsWith('info:') ||
+    l.toLowerCase().startsWith('debug:') ||
+    l.toLowerCase().includes('archivo de memoria no encontrado') ||
+    l.toLowerCase().includes('descargando') ||
+    l.toLowerCase().includes('control server') ||
+    l.toLowerCase().includes('ron 24/7') ||
+    /^http(s)?:\/\//i.test(l);
+
   const content = lines.filter(l => !isLog(l));    
+
   if (content.length === 0) {    
     const last = [...lines].reverse().find(l => l && !isLog(l));    
     return last || '';    
   }    
-  return content.join('\n').trim();    
-};    
+
+  // 🔹 AQUÍ normalizamos ANTES de devolver
+  let cleaned = content.join('\n').trim();
+
+  // Cambiar "; " por ". " cuando parece final de frase (antes de mayúscula/número)
+  cleaned = cleaned.replace(/;\s+(?=[A-ZÁÉÍÓÚÑ0-9])/g, '. ');
+
+  // Opcional: si hay ";" pegado a texto, meter un espacio
+  cleaned = cleaned.replace(/;(?=\S)/g, '; ');
+
+  return cleaned;    
+};
+   
     
 const Chat = () => {    
   const [messages, setMessages] = useState([]);    
@@ -62,7 +87,8 @@ const Chat = () => {
   const messagesEndRef = useRef(null);    
   const isSubmittingRef = useRef(false);    
   const lastSubmitTimeRef = useRef(0); 
-  const [showTasks, setShowTasks] = useState(false); 
+  const [showTasks, setShowTasks] = useState(false);
+  const [hasActiveTasks, setHasActiveTasks] = useState(false); 
     
   const { token, logout } = useAuth();    
     
@@ -98,87 +124,254 @@ const Chat = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });    
   };    
   useEffect(() => { scrollToBottom(); }, [messages]);    
-    
-  // MODIFICADO: Deduplicar conversaciones al cargar  
-  useEffect(() => {    
-    const loadConversations = async () => {    
-      try {    
-        const response = await ronAPI.getUserConversations(token);    
-        const conversations = response.conversations || [];    
-          
-        // NUEVO: Deduplicar por contenido + timestamp cercano (dentro de 5 segundos)  
-        const deduplicated = [];  
-        const seen = new Map(); // key: "user|ron", value: timestamp  
-          
-        for (const conv of conversations) {  
-          const key = `${conv.user}|${conv.ron}`;  
-          const timestamp = new Date(conv.timestamp).getTime();  
-            
-          // Verificar si ya vimos este par recientemente (dentro de 5 segundos)  
-          if (seen.has(key)) {  
-            const lastTimestamp = seen.get(key);  
-            if (Math.abs(timestamp - lastTimestamp) < 5000) {  
-              // Es un duplicado reciente, saltarlo  
-              continue;  
-            }  
-          }  
-            
-          seen.set(key, timestamp);  
-          deduplicated.push(conv);  
-        }  
-          
-        const formatted = deduplicated  
-          .map((conv, index) => ([    
-            {    
-              id: `user-${index}-${conv.timestamp || Date.now()}`,    
-              text: conv.user,    
-              sender: 'user',    
-              timestamp: conv.timestamp,    
-            },    
-            {    
-              id: `ron-${index}-${conv.timestamp || Date.now()}`,    
-              text: sanitizeRonText(conv.ron),    
-              sender: 'ron',    
-              timestamp: conv.timestamp,    
-            }    
-          ]))    
-          .flat();    
-        setMessages(formatted);    
-      } catch (err) {    
-        console.error('Error cargando conversaciones:', err);    
-        setError('No se pudo cargar el historial de chat.');    
-      }    
-    };    
-    if (token) loadConversations();    
-  }, [token]);    
-    
-  // 🔹 Escuchar cuando una tarea de fondo termina y mandar el resumen al chat
+   
+
+  const isSystemToolPrompt = (txt = '') => {
+    if (typeof txt !== 'string') return false;
+    const t = txt.trim();
+    if (!t) return false;
+
+    // Prompts internos del analizador de archivos
+    if (t.startsWith('Quiero que actúes como un experto en revisión de código')) return true;
+    if (t.includes('=== METADATOS DEL ARCHIVO ===')) return true;
+    if (t.includes('=== VISTA PREVIA DEL ARCHIVO ===')) return true;
+    if (t.includes('Análisis automático y vista previa del archivo:')) return true;
+
+    return false;
+  };
+
   useEffect(() => {
-    if (!window?.electronAPI?.onTaskCompletedMessage) return;
+    const loadConversations = async () => {
+      try {
+        const response = await ronAPI.getUserConversations(token);
+        const conversations = response.conversations || [];
 
-    const unsubscribe = window.electronAPI.onTaskCompletedMessage(
-      ({ id, action, summary }) => {
-        if (!summary) return;
+        const deduplicated = [];
+        const seen = new Map(); // key: "user|ron", value: timestamp
 
-        const text = sanitizeRonText(summary);
+        for (const conv of conversations) {
+          // ⛔️ Saltar prompts internos de herramientas
+          if (isSystemToolPrompt(conv.user)) {
+            continue;
+          }
 
-        const taskMessage = {
-          id: `task-${id}-${Date.now()}`,
-          text,
+          const key = `${conv.user}|${conv.ron}`;
+          const timestamp = new Date(conv.timestamp).getTime();
+
+          if (seen.has(key)) {
+            const lastTimestamp = seen.get(key);
+            if (Math.abs(timestamp - lastTimestamp) < 5000) {
+              continue;
+            }
+          }
+
+          seen.set(key, timestamp);
+          deduplicated.push(conv);
+        }
+
+        const formatted = deduplicated
+          .map((conv, index) => ([
+            {
+              id: `user-${index}-${conv.timestamp || Date.now()}`,
+              text: conv.user,
+              sender: 'user',
+              timestamp: conv.timestamp,
+            },
+            {
+              id: `ron-${index}-${conv.timestamp || Date.now()}`,
+              text: sanitizeRonText(conv.ron),
+              sender: 'ron',
+              timestamp: conv.timestamp,
+            }
+          ]))
+          .flat();
+
+        setMessages(formatted);
+      } catch (err) {
+        console.error('Error cargando conversaciones:', err);
+        setError('No se pudo cargar el historial de chat.');
+      }
+    };
+
+    if (token) loadConversations();
+  }, [token]);
+
+    
+// 🔹 Un solo useEffect para tareas de fondo + resultados de comandos (incluye recordatorios)
+useEffect(() => {
+  const api = window.electronAPI;
+  if (!api) return;
+
+  // Helper para añadir mensajes de Ron evitando duplicados por texto
+  const pushRonMessage = (text, meta = {}) => {
+    if (!text || typeof text !== 'string') return;
+
+    const cleaned = sanitizeRonText(text);
+
+    setMessages((prev) => {
+      const alreadyExists = prev.some((m) => {
+        if (m.sender !== 'ron') return false;
+        if (m.text !== cleaned) return false;
+
+        // Si viene con taskId/commandAction/source, miramos que coincidan también
+        if (meta.taskId && m.taskId && m.taskId !== meta.taskId) return false;
+        if (meta.commandAction && m.commandAction && m.commandAction !== meta.commandAction) return false;
+        if (meta.source && m.source && m.source !== meta.source) return false;
+
+        return true;
+      });
+
+      if (alreadyExists) return prev;
+
+      return [
+        ...prev,
+        {
+          id: `ron-${Date.now()}-${Math.random()}`,
+          text: cleaned,
           sender: 'ron',
           timestamp: new Date().toISOString(),
-        };
+          ...meta,
+        },
+      ];
+    });
+  };
 
-        // Añadimos el mensaje de Ron al final del chat
-        setMessages((prev) => [...prev, taskMessage]);
+  // 👉 1) Cuando una tarea de fondo termina (análisis de archivo, recordatorios, etc.)
+  const offTask = api.onTaskCompletedMessage?.((data) => {
+    if (!data) return;
+    const { id, action, ok, summary, error, description, params } = data;
+
+    let text = '';
+
+    // 🔍 Analizador de archivos
+    if (action === 'analyze_local_file' || action === 'analyze_file') {
+      if (ok && summary) {
+        text = summary;
+      } else if (!ok && error) {
+        text = `⚠️ No pude completar la tarea de análisis:\n${error}`;
       }
-    );
+    }
 
-    // cleanup al desmontar
+    // ⏰ Recordatorios (reminder_timer)
+    else if (action === 'reminder_timer') {
+      if (ok) {
+        // Intentar sacar el título del recordatorio
+        const p = params || {};
+        let reminderTitle =
+          p.reminder_title ||
+          p.title ||
+          p.name ||
+          p.text ||
+          '';
+
+        // Si no viene título claro, intentar extraerlo de la descripción:
+        // p.ej: "Recordatorio en 1 minuto: mandar el informe"
+        if (!reminderTitle && typeof description === 'string') {
+          const idx = description.indexOf(':');
+          if (idx !== -1) {
+            reminderTitle = description.slice(idx + 1).trim();
+          }
+        }
+
+        // Último fallback: limpiar el "tu recordatorio" del summary
+        if (!reminderTitle && typeof summary === 'string') {
+          reminderTitle = summary.replace('⏰ Te recuerdo:', '')
+                                 .replace('tu recordatorio', '')
+                                 .trim();
+        }
+
+        if (!reminderTitle) {
+          reminderTitle = 'tu recordatorio';
+        }
+
+        text = `⏰ Te recuerdo: ${reminderTitle}`;
+      } else if (!ok && error) {
+        text = `⚠️ Hubo un problema con el recordatorio:\n${error}`;
+      }
+    }
+
+    // Otros tipos de tareas -> de momento los ignoramos para no llenar el chat
+    else {
+      return;
+    }
+
+    if (!text) return;
+
+    pushRonMessage(text, {
+      source: 'task',
+      taskId: id,
+      taskAction: action,
+    });
+  });
+
+  // 👉 2) Resultados de comandos locales (list_files, read_file, copy_file, etc.)
+  const offCmd = api.onCommandResults?.((results) => {
+    if (!Array.isArray(results)) return;
+
+    results.forEach((res) => {
+      const { action, ok, message, error } = res || {};
+      let text = '';
+
+      if (ok && message) {
+        text = String(message);
+      } else if (!ok && error) {
+        text = `⚠️ ${error}`;
+      } else {
+        return;
+      }
+
+      pushRonMessage(text, {
+        source: 'command',
+        commandAction: action,
+      });
+    });
+  });
+
+  // Cleanup de ambos listeners
+  return () => {
+    if (typeof offTask === 'function') offTask();
+    if (typeof offCmd === 'function') offCmd();
+  };
+}, []);
+
+
+
+
+  // 🔔 NUEVO: efecto para detectar si hay tareas activas (queued/running)
+  useEffect(() => {
+    const api = window.electronAPI;
+    if (!api) return;
+
+    let cancelled = false;
+    let unsubscribe = null;
+
+    const refreshTasks = async () => {
+      try {
+        const list = (await api.listTasks?.()) || [];
+        if (cancelled) return;
+
+        const active = list.some(
+          (t) => t.status === 'running' || t.status === 'queued'
+        );
+        setHasActiveTasks(active);
+      } catch (e) {
+        console.error('Error cargando tareas:', e);
+      }
+    };
+
+    // Carga inicial
+    refreshTasks();
+
+    // Suscribirse a cambios
+    if (api.onTaskUpdated) {
+      unsubscribe = api.onTaskUpdated((_task) => {
+        refreshTasks();
+      });
+    }
+
     return () => {
-      if (typeof unsubscribe === 'function') {
-        unsubscribe();
-      }
+      cancelled = true;
+      if (typeof unsubscribe === 'function') unsubscribe();
     };
   }, []);
 
@@ -350,26 +543,23 @@ const Chat = () => {
   return (    
     <div className="chat-container">    
       {/* Barra superior con botón de tareas */}
-      <div className="chat-top-bar" style={{ 
-        display: 'flex',
-        justifyContent: 'flex-end',
-        padding: '4px 8px'
-      }}>
+      <div
+        className="chat-top-bar"
+        style={{
+          display: 'flex',
+          justifyContent: 'flex-end',
+          padding: '4px 8px',
+        }}
+      >
         <button
           type="button"
-          className="task-center-toggle"
+          className={
+            'task-center-toggle ' +
+            (hasActiveTasks ? 'task-center-toggle--active' : '')
+          }
           onClick={() => setShowTasks((v) => !v)}
-          style={{
-            fontSize: '0.85rem',
-            borderRadius: '999px',
-            padding: '4px 10px',
-            border: '1px solid #444',
-            background: '#1b1b1b',
-            color: '#f5f5f5',
-            cursor: 'pointer'
-          }}
         >
-          📋 Tareas
+          📋 Tareas{hasActiveTasks ? ' •' : ''}
         </button>
       </div>
 

@@ -76,9 +76,12 @@ export const TaskCenter = ({ open, onClose }) => {
     }
   };
 
-  const sorted = [...tasks].sort((a, b) =>
-    (a.created_at || "").localeCompare(b.created_at || "")
-  );
+  const sorted = [...tasks].sort((a, b) => {
+    const ta = new Date(a.created_at || a.updated_at || 0).getTime();
+    const tb = new Date(b.created_at || b.updated_at || 0).getTime();
+    return tb - ta;
+  });
+
 
   return (
     <div
@@ -87,6 +90,7 @@ export const TaskCenter = ({ open, onClose }) => {
         right: 16,
         bottom: 16,
         width: 360,
+        maxWidth: 'calc(100vw - 32px)', // para pantallas estrechas
         maxHeight: "60vh",
         background: "#111",
         color: "#f5f5f5",

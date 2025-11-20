@@ -10,13 +10,70 @@ let taskManager; // instancia global
 const taskProcesses = new Map(); // taskId -> child_process
 
 // 🔹 Helper para resolver la ruta de Python (sistema en dev, embebido en producción)
+const os = require('os');
+
 function getPythonExePath() {
-  // Usar Python del sistema
-  if (process.platform === 'win32') {
-    return 'python'; // o 'py', si quisieras usar el launcher de Windows
+  if (process.platform !== 'win32') {
+    // En Linux/Mac normalmente es python3
+    return 'python3';
   }
-  return 'python3';
+
+  const candidates = [];
+
+  // 1) Variable opcional por si en el futuro quieres fijar una ruta concreta
+  if (process.env.RON_PYTHON_EXE) {
+    candidates.push(process.env.RON_PYTHON_EXE);
+  }
+
+  // 2) Rutas típicas de instalación de python.org (per user y per machine)
+  if (process.env.LOCALAPPDATA) {
+    candidates.push(
+      path.join(process.env.LOCALAPPDATA, 'Programs', 'Python', 'Python312', 'python.exe')
+    );
+  }
+
+  if (process.env['ProgramFiles']) {
+    candidates.push(
+      path.join(process.env['ProgramFiles'], 'Python312', 'python.exe')
+    );
+  }
+
+  if (process.env['ProgramFiles(x86)']) {
+    candidates.push(
+      path.join(process.env['ProgramFiles(x86)'], 'Python312-32', 'python.exe')
+    );
+  }
+
+  // 3) Probar el launcher oficial "py"
+  candidates.push('py');
+
+  // 4) Último recurso: "python" en PATH
+  candidates.push('python');
+
+  for (const p of candidates) {
+    if (!p) continue;
+
+    try {
+      if (p === 'python' || p === 'py') {
+        // Probar comando en PATH
+        const test = spawnSync(p, ['--version'], { encoding: 'utf8' });
+        if (test && test.status === 0) {
+          console.log(`[Python] usando ejecutable "${p}" del PATH:`, test.stdout || test.stderr);
+          return p;
+        }
+      } else if (fs2.existsSync(p)) {
+        console.log('[Python] usando ejecutable en', p);
+        return p;
+      }
+    } catch (e) {
+      // ignoramos y seguimos probando
+    }
+  }
+
+  console.warn('[Python] No se encontró ningún ejecutable de Python válido, se usará "python" como fallback');
+  return 'python';
 }
+
 
 
 

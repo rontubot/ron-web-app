@@ -1,15 +1,25 @@
-const { app, BrowserWindow, ipcMain } = require('electron');  
-const path = require('path');  
-const isDev = require('electron-is-dev');  
-const { spawn } = require('child_process');  
-const net = require('net');  
-const fs = require('fs').promises;  
-const fs2 = require('fs');  
+const { app, BrowserWindow, ipcMain } = require('electron');
+const path = require('path');
+const isDev = require('electron-is-dev');
+const { spawn } = require('child_process');
+const net = require('net');
+const fs = require('fs').promises;
+const fs2 = require('fs');
 const { TaskManager } = require("./taskManager");
 let taskManager; // instancia global
 const taskProcesses = new Map(); // taskId -> child_process
 
-// Ejecuta una tarea local en segundo plano (por ahora: analyze_file)
+// 🔹 Helper para resolver la ruta de Python (sistema en dev, embebido en producción)
+function getPythonExePath() {
+  // Usar Python del sistema
+  if (process.platform === 'win32') {
+    return 'python'; // o 'py', si quisieras usar el launcher de Windows
+  }
+  return 'python3';
+}
+
+
+
 // Ejecuta una tarea local en segundo plano (por ahora: analyze_file)
 function runBackgroundTask(task, username = 'default') {
   if (!task || !taskManager) return;
@@ -98,10 +108,12 @@ print(json.dumps({'ok': ok, 'summary': summary, 'error': error}, ensure_ascii=Fa
   };
 
   // 🚀 Lanzar el proceso Python en background
-  const pythonProcess = spawn('python', ['-u', '-c', pythonCode], {
+  const pythonExe = getPythonExePath();
+  const pythonProcess = spawn(pythonExe, ['-u', '-c', pythonCode], {
     cwd: pythonScriptsDir,
     env,
   });
+
 
   taskProcesses.set(task.id, pythonProcess);
 
@@ -276,6 +288,7 @@ function getPreloadPath() {
 }   
   
 // --------- Descarga de scripts Python a una carpeta writable ----------  
+// --------- Descarga de scripts Python a una carpeta writable ----------
 async function downloadPythonFiles() {    
   const baseUrl = 'https://raw.githubusercontent.com/rontubot/Ron/main';    
   const baseDir = app.isPackaged    
@@ -292,7 +305,7 @@ async function downloadPythonFiles() {
   } catch {  
     console.log('📦 Primera instalación de dependencias');  
   }  
-  
+
   const files = [    
     { url: `${baseUrl}/local/ron_launcher.py`, path: path.join(baseDir, 'ron_launcher.py') },  
     { url: `${baseUrl}/local/python_command_bridge.py`, path: path.join(baseDir, 'python_command_bridge.py') },        
@@ -302,7 +315,7 @@ async function downloadPythonFiles() {
     { url: `${baseUrl}/core/profile.py`,       path: path.join(baseDir, 'core', 'profile.py') },    
     { url: `${baseUrl}/config.py`,             path: path.join(baseDir, 'config.py') },    
     { url: `${baseUrl}/core/autonomous.py`,    path: path.join(baseDir, 'core', 'autonomous.py') },  
-    { url: `${baseUrl}/core/task_manager.py`,  path: path.join(baseDir, 'core', 'task_manager.py') },
+    { url: `${baseUrl}/core/task_manager.py`,  path: path.join(baseDir, 'core', 'task_manager.py') }
   ];    
     
   async function fetchText(url) {    
@@ -317,7 +330,7 @@ async function downloadPythonFiles() {
       stage: 'downloading',  
       message: 'Descargando archivos de Ron desde GitHub...'  
     });  
-  
+
     await fs.mkdir(path.join(baseDir, 'core'), { recursive: true });    
     
     const initPath = path.join(baseDir, 'core', '__init__.py');    
@@ -339,19 +352,22 @@ async function downloadPythonFiles() {
           stage: 'installing',  
           message: 'Instalando dependencias Python (primera vez)...'  
         });  
-  
+
         console.log('📦 Descargando requirements.txt...');  
         const reqUrl = `${baseUrl}/requirements.txt`;  
         const reqContent = await fetchText(reqUrl);  
         const reqPath = path.join(baseDir, 'requirements.txt');  
         await fs.writeFile(reqPath, reqContent, 'utf8');  
-          
+
         console.log('📦 Instalando dependencias Python...');  
-        const pipProcess = spawn('python', ['-m', 'pip', 'install', '--user', '-r', reqPath], {  
-          stdio: 'inherit'  
-        });  
-          
-        await new Promise((resolve, reject) => {  
+
+        const pythonExe = getPythonExePath();
+        const pipProcess = spawn(pythonExe, ['-m', 'pip', 'install', '-r', reqPath], {
+          stdio: 'inherit'
+        });
+
+
+        await new Promise((resolve) => {  
           pipProcess.on('close', async (code) => {  
             if (code === 0) {  
               console.log('✅ Dependencias Python instaladas correctamente');  
@@ -363,16 +379,19 @@ async function downloadPythonFiles() {
               resolve(); // No fallar si pip falla  
             }  
           });  
+
           pipProcess.on('error', (err) => {  
             console.error('❌ Error instalando dependencias:', err);  
             resolve(); // Continuar aunque falle  
           });  
         });  
+
       } catch (error) {  
         console.warn('⚠️ No se pudieron instalar dependencias automáticamente:', error);  
       }  
-    }  
-  
+    }
+
+
     // Notificar completado  
     mainWindow?.webContents.send('download-progress', {  
       stage: 'complete',  
@@ -762,29 +781,31 @@ safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) =
                   const bridgePath = path.join(pythonScriptsDir, 'python_command_bridge.py');
 
                   await new Promise((resolve) => {    
-                    const pythonProcess = spawn('python', ['-u', '-X', 'utf8', bridgePath], {    
+                    const pythonExe = getPythonExePath();
+                    const pythonProcess = spawn(pythonExe, ['-u', '-X', 'utf8', bridgePath], {    
                       cwd: pythonScriptsDir,    
                       env: { 
                         ...process.env, 
                         PYTHONIOENCODING: 'utf-8',
+                        PYTHONPATH: `${pythonScriptsDir}${path.delimiter}${path.join(pythonScriptsDir, 'core')}`,
                         RON_API_URL: API_URL,
                         RON_AUTH_TOKEN: AUTH_TOKEN || '',
                       },    
                     });    
-                      
+                        
                     let output = '';    
                     let errorOutput = '';    
-                      
+                        
                     pythonProcess.stdout.on('data', (data) => {    
                       output += data.toString();    
                     });    
-                      
+                        
                     pythonProcess.stderr.on('data', (data) => {    
                       const txt = data.toString();
                       errorOutput += txt;    
                       console.log('[Python stderr]:', txt);    
                     });    
-                      
+                        
                     pythonProcess.on('close', (code) => {    
                       if (code === 0 && output.trim()) {    
                         try {    
@@ -801,7 +822,7 @@ safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) =
                       }    
                       resolve();    
                     });    
-                      
+                        
                     pythonProcess.on('error', (err) => {    
                       console.error('[ask-ron-stream] Error ejecutando Python bridge:', err);    
                       resolve();    
@@ -831,7 +852,6 @@ safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) =
             return { ok: true, streaming: true };
           }
 
-          
           // Formato antiguo: solo chunk sin type
           if (data.chunk && !data.type) {    
             mainWindow?.webContents.send('stream-chunk', data.chunk);    
@@ -881,14 +901,15 @@ safeHandle('start-ron-247', async (_event, userData) => {
       '--username', userData?.username || '',    
       '--control-port', '9999',    
     ];    
-    console.log('[RON] launching python:', 'python', args);    
-    
-    ronPythonProcess = spawn('python', args, {    
+    const pythonExe = getPythonExePath();
+    console.log('[RON] launching python:', pythonExe, args);    
+
+    ronPythonProcess = spawn(pythonExe, args, {    
       stdio: ['pipe', 'pipe', 'pipe'],    
       cwd: baseDir,    
       env: {    
         ...process.env,    
-        PATH: `${binPath}${path.delimiter}${process.env.PATH}`,  // NUEVO: agregar bin/ al PATH  
+        PATH: `${binPath}${path.delimiter}${process.env.PATH}`,  // seguir agregando bin/ al PATH para nircmd, etc.  
         PYTHONUTF8: '1',    
         PYTHONIOENCODING: 'utf-8',    
         PYTHONUNBUFFERED: '1',    
@@ -896,7 +917,8 @@ safeHandle('start-ron-247', async (_event, userData) => {
         RON_API_URL: API_URL,    
         RON_AUTH_TOKEN: AUTH_TOKEN || '',    
       },    
-    });    
+    });
+
     
     // Errores al lanzar    
     ronPythonProcess.on('error', (err) => {    

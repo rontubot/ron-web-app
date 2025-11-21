@@ -6,78 +6,76 @@ import './chat.css';
 import { TaskCenter } from './TaskCenter';
 
     
-const sanitizeRonText = (raw = '') => {    
-  if (!raw || typeof raw !== 'string') return '';    
+const sanitizeRonText = (raw = '') => {      
+  if (!raw || typeof raw !== 'string') return '';      
+      
+  try {      
+    const trimmed = raw.trim();      
+    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {      
+      const parsed = JSON.parse(trimmed);      
+      if (parsed && typeof parsed === 'object') {      
+        const candidate =      
+          (typeof parsed.user_response === 'string' && parsed.user_response.trim()) ||      
+          (typeof parsed.reply === 'string' && parsed.reply.trim()) ||      
+          (typeof parsed.message === 'string' && parsed.message.trim());      
+      
+        if (candidate) return candidate.trim();      
+      }      
+    }      
+  } catch (e) {}      
+      
+  // Normalizar saltos de línea escapados  
+  let text = raw.replace(/\\n/g, '\n');      
+  
+  // 🔹 MEJORADO: Regex más robusta para eliminar JSON  
+  // Elimina JSON con cualquier formato (con o sin saltos de línea)  
+  text = text.replace(/\{[\s\S]*?"user_response"[\s\S]*?"commands"[\s\S]*?\}/g, '');  
+  text = text.replace(/\{[\s\S]*?"action"[\s\S]*?"params"[\s\S]*?\}/g, '');  
     
-  try {    
-    const trimmed = raw.trim();    
-    if (trimmed.startsWith('{') && trimmed.endsWith('}')) {    
-      const parsed = JSON.parse(trimmed);    
-      if (parsed && typeof parsed === 'object') {    
-        const candidate =    
-          (typeof parsed.user_response === 'string' && parsed.user_response.trim()) ||    
-          (typeof parsed.reply === 'string' && parsed.reply.trim()) ||    
-          (typeof parsed.message === 'string' && parsed.message.trim());    
-    
-        if (candidate) return candidate.trim();    
-      }    
-    }    
-  } catch (e) {}    
-    
-  // Normalizar saltos de línea escapados
-  let text = raw.replace(/\\n/g, '\n');    
-
-  // Quitar cualquier blob JSON que tenga user_response/commands,
-  // aunque tenga saltos de línea o espacios raros
-  text = text.replace(/\{"user_response"[\s\S]*?"commands":\[[\s\S]*?\]\}/g, '');    
-  text = text.replace(/\{"action"[\s\S]*?"params":\{[\s\S]*?\}\}/g, '');    
-    
-  const lines = text.split(/\r?\n/).map(l => l.trim());    
-    
-  const isLog = (l) =>
-    !l ||
-    l.startsWith('📁') ||
-    l.startsWith('📂') ||
-    l.startsWith('📊') ||
-    l.startsWith('✅') ||
-    l.startsWith('🔊') ||
-    l.startsWith('🔉') ||
-    l.startsWith('🔄') ||
-    l.startsWith('🧹') ||
-    l.startsWith('💿') ||
-    l.startsWith('🌐') ||
-    // Errores técnicos típicos de comandos de archivos
-    l.startsWith('⚠️ El archivo no existe:') ||
-    l.startsWith('⚠️ La ruta no es un archivo:') ||
-    l.startsWith('⚠️ La ruta no es un directorio válido:') ||
-    l.startsWith('⚠️ Directorio vacío') ||
-    l.toLowerCase().startsWith('info:') ||
-    l.toLowerCase().startsWith('debug:') ||
-    l.toLowerCase().includes('archivo de memoria no encontrado') ||
-    l.toLowerCase().includes('descargando') ||
-    l.toLowerCase().includes('control server') ||
-    l.toLowerCase().includes('ron 24/7') ||
-    /^http(s)?:\/\//i.test(l);
-
-  const content = lines.filter(l => !isLog(l));    
-
-  if (content.length === 0) {    
-    const last = [...lines].reverse().find(l => l && !isLog(l));    
-    return last || '';    
-  }    
-
-  // 🔹 AQUÍ normalizamos ANTES de devolver
-  let cleaned = content.join('\n').trim();
-
-  // Cambiar "; " por ". " cuando parece final de frase (antes de mayúscula/número)
-  cleaned = cleaned.replace(/;\s+(?=[A-ZÁÉÍÓÚÑ0-9])/g, '. ');
-
-  // Opcional: si hay ";" pegado a texto, meter un espacio
-  cleaned = cleaned.replace(/;(?=\S)/g, '; ');
-
-  return cleaned;    
+  // 🔹 NUEVO: Eliminar JSON que empiece con { y termine con }  
+  text = text.replace(/^\s*\{.*\}\s*$/g, '');  
+      
+  const lines = text.split(/\r?\n/).map(l => l.trim());      
+      
+  const isLog = (l) =>  
+    !l ||  
+    l.startsWith('📁') ||  
+    l.startsWith('📂') ||  
+    l.startsWith('📊') ||  
+    l.startsWith('✅') ||  
+    l.startsWith('🔊') ||  
+    l.startsWith('🔉') ||  
+    l.startsWith('🔄') ||  
+    l.startsWith('🧹') ||  
+    l.startsWith('💿') ||  
+    l.startsWith('🌐') ||  
+    l.startsWith('⚠️ El archivo no existe:') ||  
+    l.startsWith('⚠️ La ruta no es un archivo:') ||  
+    l.startsWith('⚠️ La ruta no es un directorio válido:') ||  
+    l.startsWith('⚠️ Directorio vacío') ||  
+    l.toLowerCase().startsWith('info:') ||  
+    l.toLowerCase().startsWith('debug:') ||  
+    l.toLowerCase().includes('archivo de memoria no encontrado') ||  
+    l.toLowerCase().includes('descargando') ||  
+    l.toLowerCase().includes('control server') ||  
+    l.toLowerCase().includes('ron 24/7') ||  
+    /^http(s)?:\/\//i.test(l);  
+  
+  const content = lines.filter(l => !isLog(l));      
+  
+  if (content.length === 0) {      
+    const last = [...lines].reverse().find(l => l && !isLog(l));      
+    return last || '';      
+  }      
+  
+  let cleaned = content.join('\n').trim();  
+  
+  // Cambiar "; " por ". " cuando parece final de frase  
+  cleaned = cleaned.replace(/;\s+(?=[A-ZÁÉÍÓÚÑ0-9])/g, '. ');  
+  cleaned = cleaned.replace(/;(?=\S)/g, '; ');  
+  
+  return cleaned;      
 };
-   
     
 const Chat = () => {    
   const [messages, setMessages] = useState([]);    

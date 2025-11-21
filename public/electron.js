@@ -1,13 +1,15 @@
 const { app, BrowserWindow, ipcMain } = require('electron');
 const path = require('path');
 const isDev = require('electron-is-dev');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 const net = require('net');
 const fs = require('fs').promises;
 const fs2 = require('fs');
 const { TaskManager } = require("./taskManager");
 let taskManager; // instancia global
 const taskProcesses = new Map(); // taskId -> child_process
+
+
 
 // 🔹 Helper para resolver la ruta de Python (sistema en dev, embebido en producción)
 const os = require('os');
@@ -54,12 +56,22 @@ function getPythonExePath() {
     if (!p) continue;
 
     try {
-      if (p === 'python' || p === 'py') {
-        // Probar comando en PATH
-        const test = spawnSync(p, ['--version'], { encoding: 'utf8' });
+      if (p === 'python') {
+        const test = spawnSync('python', ['--version'], { encoding: 'utf8' });
         if (test && test.status === 0) {
-          console.log(`[Python] usando ejecutable "${p}" del PATH:`, test.stdout || test.stderr);
-          return p;
+          console.log('[Python] usando ejecutable "python" del PATH:', test.stdout || test.stderr);
+          return 'python';
+        }
+      } else if (p === 'py') {
+        // probamos py -3 --version primero
+        let test = spawnSync('py', ['-3', '--version'], { encoding: 'utf8' });
+        if (!test || test.status !== 0) {
+          // fallback a py --version
+          test = spawnSync('py', ['--version'], { encoding: 'utf8' });
+        }
+        if (test && test.status === 0) {
+          console.log('[Python] usando launcher "py" del PATH:', test.stdout || test.stderr);
+          return 'py';
         }
       } else if (fs2.existsSync(p)) {
         console.log('[Python] usando ejecutable en', p);
@@ -401,53 +413,70 @@ async function downloadPythonFiles() {
     
     console.log('✅ Archivos Python descargados en:', baseDir);  
       
-    // Solo instalar dependencias si no están instaladas  
-    if (!depsAlreadyInstalled) {  
-      try {  
-        // Notificar inicio de instalación  
+    // Solo instalar dependencias si no están instaladas    
+    if (!depsAlreadyInstalled) {    
+      try {    
+        // Notificar inicio de instalación    
+        mainWindow?.webContents.send('download-progress', {    
+          stage: 'installing',    
+          message: 'Instalando dependencias Python (primera vez)...'    
+        });    
+  
+        // 🔹 NUEVO: Intentar usar requirements.txt empaquetado primero  
+        const bundledReqPath = app.isPackaged    
+          ? path.join(process.resourcesPath, 'requirements.txt')    
+          : path.join(process.cwd(), 'requirements.txt');    
+            
+        let reqPath;    
+        try {    
+          await fs.access(bundledReqPath);    
+          reqPath = bundledReqPath;    
+          console.log('📦 Usando requirements.txt empaquetado');    
+        } catch {    
+          // Fallback: descargar desde GitHub    
+          console.log('📦 Descargando requirements.txt desde GitHub...');    
+          const reqUrl = `${baseUrl}/requirements.txt`;    
+          const reqContent = await fetchText(reqUrl);    
+          reqPath = path.join(baseDir, 'requirements.txt');    
+          await fs.writeFile(reqPath, reqContent, 'utf8');    
+        }  
+  
+        console.log('📦 Instalando dependencias Python...');    
+  
+        const pythonExe = getPythonExePath();  
+        const pipProcess = spawn(pythonExe, ['-m', 'pip', 'install', '-r', reqPath], {  
+          stdio: 'inherit'  
+        });  
+  
+        await new Promise((resolve, reject) => {    
+          pipProcess.on('close', async (code) => {    
+            if (code === 0) {    
+              console.log('✅ Dependencias Python instaladas correctamente');    
+              // Crear archivo marcador    
+              await fs.writeFile(depsInstalledMarker, new Date().toISOString(), 'utf8');    
+              resolve();    
+            } else {    
+              console.error('❌ Error instalando dependencias Python (código:', code, ')');  
+              reject(new Error(`pip install falló con código ${code}. Verifica que Python esté instalado correctamente.`));  
+            }    
+          });    
+  
+          pipProcess.on('error', (err) => {    
+            console.error('❌ Error instalando dependencias:', err);    
+            reject(err);  
+          });    
+        });    
+  
+      } catch (error) {    
+        console.error('⚠️ No se pudieron instalar dependencias automáticamente:', error);  
+        // Notificar al usuario del error  
         mainWindow?.webContents.send('download-progress', {  
-          stage: 'installing',  
-          message: 'Instalando dependencias Python (primera vez)...'  
+          stage: 'error',  
+          message: `Error instalando dependencias: ${error.message}`  
         });  
-
-        console.log('📦 Descargando requirements.txt...');  
-        const reqUrl = `${baseUrl}/requirements.txt`;  
-        const reqContent = await fetchText(reqUrl);  
-        const reqPath = path.join(baseDir, 'requirements.txt');  
-        await fs.writeFile(reqPath, reqContent, 'utf8');  
-
-        console.log('📦 Instalando dependencias Python...');  
-
-        const pythonExe = getPythonExePath();
-        const pipProcess = spawn(pythonExe, ['-m', 'pip', 'install', '-r', reqPath], {
-          stdio: 'inherit'
-        });
-
-
-        await new Promise((resolve) => {  
-          pipProcess.on('close', async (code) => {  
-            if (code === 0) {  
-              console.log('✅ Dependencias Python instaladas correctamente');  
-              // Crear archivo marcador  
-              await fs.writeFile(depsInstalledMarker, new Date().toISOString(), 'utf8');  
-              resolve();  
-            } else {  
-              console.warn('⚠️ Algunas dependencias no se pudieron instalar (código:', code, ')');  
-              resolve(); // No fallar si pip falla  
-            }  
-          });  
-
-          pipProcess.on('error', (err) => {  
-            console.error('❌ Error instalando dependencias:', err);  
-            resolve(); // Continuar aunque falle  
-          });  
-        });  
-
-      } catch (error) {  
-        console.warn('⚠️ No se pudieron instalar dependencias automáticamente:', error);  
-      }  
+        throw error; // Propagar el error para que el usuario lo vea  
+      }    
     }
-
 
     // Notificar completado  
     mainWindow?.webContents.send('download-progress', {  
@@ -930,7 +959,160 @@ safeHandle('ask-ron-stream', async (_evt, { text, username = 'default' } = {}) =
   }  
 });
 
-
+safeHandle('ask-ron', async (_evt, { text, username = 'default' } = {}) => {    
+  const q = (text || '').trim();    
+  if (!q) return { ok: false, text: 'Mensaje vacío' };    
+    
+  try {    
+    const apiBase = API_URL;    
+    const res = await fetchImpl(`${apiBase}/ron`, {    
+      method: 'POST',    
+      headers: {    
+        'Content-Type': 'application/json',    
+        ...(AUTH_TOKEN ? { Authorization: `Bearer ${AUTH_TOKEN}` } : {}),    
+      },    
+      body: JSON.stringify({ text: q, username, return_json: true, source: 'desktop' }),    
+    });    
+    
+    const data = await res.json();    
+    const userResponse = data.user_response || data.ron || '';  
+    const commands = data.commands || [];  
+  
+    // 🔹 NUEVO: Ejecutar comandos si existen  
+    if (Array.isArray(commands) && commands.length > 0) {  
+      const pythonCommands = [];  
+  
+      for (const cmd of commands) {  
+        if (!cmd || !cmd.action) continue;  
+  
+        // Manejar queue_local_task  
+        if (cmd.action === 'queue_local_task') {  
+          const { task_type, description, path, params } = cmd.params || {};  
+  
+          if (taskManager) {  
+            let kind = task_type || 'generic_task';  
+            if (kind === 'analyze_local_file') {  
+              kind = 'analyze_file';  
+            }  
+  
+            const taskParams = (params && typeof params === 'object') ? { ...params } : {};  
+            if (path && !taskParams.path) {  
+              taskParams.path = path;  
+            }  
+  
+            const task = taskManager.createTask({  
+              kind,  
+              description: description || 'Tarea en segundo plano',  
+              params: taskParams,  
+              source: 'local',  
+            });  
+  
+            try {  
+              runBackgroundTask(task, username);  
+            } catch (e) {  
+              console.error('[ask-ron] Error iniciando tarea:', e);  
+              taskManager.updateTask(task.id, {  
+                status: 'failed',  
+                progress: 0,  
+                error: String(e),  
+              });  
+            }  
+          }  
+          continue;  
+        }  
+  
+        pythonCommands.push(cmd);  
+      }  
+  
+      // Ejecutar comandos Python  
+      if (pythonCommands.length > 0) {  
+        console.log(`[ask-ron] Ejecutando ${pythonCommands.length} comando(s) vía Python`);  
+  
+        try {  
+          const pythonScriptsDir = app.isPackaged      
+            ? path.join(app.getPath('userData'), 'python-scripts')      
+            : path.join(process.cwd(), 'python-scripts');  
+  
+          const bridgePath = path.join(pythonScriptsDir, 'python_command_bridge.py');  
+  
+          await new Promise((resolve) => {      
+            const pythonExe = getPythonExePath();  
+            const pythonProcess = spawn(pythonExe, ['-u', '-X', 'utf8', bridgePath], {      
+              cwd: pythonScriptsDir,      
+              env: {   
+                ...process.env,   
+                PYTHONIOENCODING: 'utf-8',  
+                PYTHONPATH: `${pythonScriptsDir}${path.delimiter}${path.join(pythonScriptsDir, 'core')}`,  
+                RON_API_URL: API_URL,  
+                RON_AUTH_TOKEN: AUTH_TOKEN || '',  
+              },      
+            });      
+                  
+            let output = '';      
+            let errorOutput = '';      
+                  
+            pythonProcess.stdout.on('data', (data) => {      
+              output += data.toString();      
+            });      
+                  
+            pythonProcess.stderr.on('data', (data) => {      
+              const txt = data.toString();  
+              errorOutput += txt;      
+              console.log('[Python stderr]:', txt);      
+            });      
+                  
+            pythonProcess.on('close', (code) => {      
+              if (code === 0 && output.trim()) {      
+                try {      
+                  const results = JSON.parse(output);      
+                  console.log('[ask-ron] Resultados:', results);      
+                  mainWindow?.webContents.send('command-results', results);      
+                  const successCount = results.filter(r => r.ok).length;      
+                  console.log(`✅ ${successCount} comando(s) ejecutado(s) exitosamente`);      
+                } catch (e) {      
+                  console.error('[ask-ron] Error parseando resultados:', e);      
+                }      
+              } else if (errorOutput) {      
+                console.error('[ask-ron] Python error:', errorOutput);      
+              }      
+              resolve();      
+            });      
+                  
+            pythonProcess.on('error', (err) => {      
+              console.error('[ask-ron] Error ejecutando Python bridge:', err);      
+              resolve();      
+            });      
+  
+            try {  
+              const payload = {  
+                username,  
+                commands: pythonCommands,  
+              };  
+              pythonProcess.stdin.write(JSON.stringify(payload), 'utf8');  
+              pythonProcess.stdin.end();  
+            } catch (e) {  
+              console.error('[ask-ron] Error escribiendo en stdin:', e);  
+              try { pythonProcess.kill(); } catch {}  
+              resolve();  
+            }  
+          });      
+              
+        } catch (e) {      
+          console.error('[ask-ron] Error ejecutando comandos:', e);      
+        }      
+      }  
+    }  
+      
+    return {    
+      ok: true,    
+      user_response: userResponse,    
+      commands: commands,  
+    };    
+  } catch (err) {    
+    console.error('[ask-ron] error:', err);    
+    return { ok: false, text: 'Error al comunicarse con Ron' };    
+  }    
+});
   
 // Handler para iniciar Ron 24/7    
 safeHandle('start-ron-247', async (_event, userData) => {    

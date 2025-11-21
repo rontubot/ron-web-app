@@ -1,107 +1,110 @@
-{
-  "name": "ron-web-app",
-  "version": "1.0.0",
-  "description": "Aplicacion react de Ron",
-  "main": "public/electron.js",
-  "homepage": "./",
-  "author": "Ron Assistant Team",
-  "scripts": {
-    "start": "react-scripts start",
-    "build": "react-scripts build",
-    "test": "react-scripts test",
-    "eject": "react-scripts eject",
-    "electron": "electron .",
-    "electron-dev": "ELECTRON_IS_DEV=true electron .",
-    "electron-pack": "electron-builder",
-    "preelectron-pack": "npm run build",
-    "postinstall": "electron-builder install-app-deps",
-    "predist": "node scripts/make-ico.js",
-    "dist": "electron-builder --win"
-  },
-  "dependencies": {
-    "axios": "1.4.0",
-    "bcryptjs": "2.4.3",
-    "cors": "2.8.5",
-    "dotenv": "16.0.0",
-    "electron-is-dev": "2.0.0",
-    "express": "4.18.0",
-    "jsonwebtoken": "9.0.0",
-    "react": "18.2.0",
-    "react-dom": "18.2.0",
-    "react-markdown": "^10.1.0",
-    "react-router-dom": "6.8.1",
-    "react-scripts": "5.0.1"
-  },
-  "devDependencies": {
-    "@electron/rebuild": "3.2.13",
-    "@types/react": "18.2.0",
-    "@types/react-dom": "18.2.0",
-    "electron": "27.0.0",
-    "electron-builder": "23.6.0",
-    "png-to-ico": "^2.1.8"
-  },
-  "build": {
-    "appId": "com.ron.assistant",
-    "productName": "Ron Assistant",
-    "directories": {
-      "output": "dist",
-      "buildResources": "build"
-    },
-
-
-    "extraFiles": [
-      {
-        "from": "python-installer",
-        "to": "python-installer"
-      }
-    ],
-    "files": [
-      "build/**/*",
-      "public/electron.js",
-      "preload.js",
-      "python-scripts/**/*",
-      "node_modules/**/*"
-    ],
-    "win": {
-      "target": "nsis",
-      "icon": "build/icons/icon.ico"
-    },
-    "mac": {
-      "target": "dmg",
-      "icon": "build/icon.icns"
-    },
-    "linux": {
-      "target": "AppImage",
-      "icon": "build/icon.png"
-    },
-    "nsis": {
-      "oneClick": false,
-      "perMachine": false,
-      "allowElevation": true,
-      "allowToChangeInstallationDirectory": true,
-      "createDesktopShortcut": true,
-      "createStartMenuShortcut": true,
-      "runAfterFinish": true,
-      "shortcutName": "Ron Assistant",
-      "include": "installer.nsh"
-    }
-  },
-  "browserslist": {
-    "production": [
-      ">0.2%",
-      "not dead",
-      "not op_mini all"
-    ],
-    "development": [
-      "last 1 chrome version",
-      "last 1 firefox version",
-      "last 1 safari version"
-    ]
-  },
-  "eslintConfig": {
-    "extends": [
-      "react-app",
-      "react-app/jest"
-    ]
-  }
+{  
+  "name": "ron-web-app",  
+  "version": "1.0.0",  
+  "description": "Aplicacion react de Ron",  
+  "main": "public/electron.js",  
+  "homepage": "./",  
+  "author": "Ron Assistant Team",  
+  "scripts": {  
+    "start": "react-scripts start",  
+    "build": "react-scripts build",  
+    "test": "react-scripts test",  
+    "eject": "react-scripts eject",  
+    "electron": "electron .",  
+    "electron-dev": "ELECTRON_IS_DEV=true electron .",  
+    "electron-pack": "electron-builder",  
+    "preelectron-pack": "npm run build",  
+    "postinstall": "electron-builder install-app-deps",  
+    "predist": "node scripts/make-ico.js",  
+    "dist": "electron-builder --win"  
+  },  
+  "dependencies": {  
+    "axios": "1.4.0",  
+    "bcryptjs": "2.4.3",  
+    "cors": "2.8.5",  
+    "dotenv": "16.0.0",  
+    "electron-is-dev": "2.0.0",  
+    "express": "4.18.0",  
+    "jsonwebtoken": "9.0.0",  
+    "react": "18.2.0",  
+    "react-dom": "18.2.0",  
+    "react-markdown": "^10.1.0",  
+    "react-router-dom": "6.8.1",  
+    "react-scripts": "5.0.1"  
+  },  
+  "devDependencies": {  
+    "@electron/rebuild": "3.2.13",  
+    "@types/react": "18.2.0",  
+    "@types/react-dom": "18.2.0",  
+    "electron": "27.0.0",  
+    "electron-builder": "23.6.0",  
+    "png-to-ico": "^2.1.8"  
+  },  
+  "build": {  
+    "appId": "com.ron.assistant",  
+    "productName": "Ron Assistant",  
+    "directories": {  
+      "output": "dist",  
+      "buildResources": "build"  
+    },  
+    "extraFiles": [  
+      {  
+        "from": "python-installer",  
+        "to": "python-installer"  
+      },  
+      {    
+        "from": "bin",    
+        "to": "bin"    
+      }  
+    ],  
+    "files": [  
+      "build/**/*",  
+      "public/electron.js",  
+      "preload.js",  
+      "python-scripts/**/*",  
+      "node_modules/**/*",  
+      "requirements.txt"  
+    ],  
+    "win": {  
+      "target": "nsis",  
+      "icon": "build/icons/icon.ico"  
+    },  
+    "mac": {  
+      "target": "dmg",  
+      "icon": "build/icon.icns"  
+    },  
+    "linux": {  
+      "target": "AppImage",  
+      "icon": "build/icon.png"  
+    },  
+    "nsis": {  
+      "oneClick": false,  
+      "perMachine": false,  
+      "allowElevation": true,  
+      "allowToChangeInstallationDirectory": true,  
+      "createDesktopShortcut": true,  
+      "createStartMenuShortcut": true,  
+      "runAfterFinish": true,  
+      "shortcutName": "Ron Assistant",  
+      "include": "installer.nsh"  
+    }  
+  },  
+  "browserslist": {  
+    "production": [  
+      ">0.2%",  
+      "not dead",  
+      "not op_mini all"  
+    ],  
+    "development": [  
+      "last 1 chrome version",  
+      "last 1 firefox version",  
+      "last 1 safari version"  
+    ]  
+  },  
+  "eslintConfig": {  
+    "extends": [  
+      "react-app",  
+      "react-app/jest"  
+    ]  
+  }  
 }

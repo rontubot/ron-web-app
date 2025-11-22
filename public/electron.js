@@ -104,16 +104,26 @@ function runBackgroundTask(task, username = 'default') {
     action = 'analyze_local_file';
   }
 
-  // Si la tarea es de archivo, comprobamos existencia si hay file_path o path
-  const filePath = params.file_path || params.path;
-  if (filePath && !fs2.existsSync(filePath)) {
-    console.warn('[TaskManager] Archivo no encontrado para tarea', task.id, filePath);
-    taskManager.updateTask(task.id, {
-      status: 'failed',
-      progress: 0,
-      error: `No se encontró el archivo: ${filePath}`,
-    });
-    return;
+  // Si la tarea es de archivo, comprobamos existencia si hay file_path o path  
+  const filePath = params.file_path || params.path;  
+  if (filePath) {  
+    // Reemplazar {username} con el nombre de usuario real  
+    const actualUsername = username || 'default';  
+    const resolvedPath = filePath.replace(/{username}/g, actualUsername);  
+      
+    if (!fs2.existsSync(resolvedPath)) {  
+      console.warn('[TaskManager] Archivo no encontrado para tarea', task.id, resolvedPath);  
+      taskManager.updateTask(task.id, {  
+        status: 'failed',  
+        progress: 0,  
+        error: `No se encontró el archivo: ${resolvedPath}`,  
+      });  
+      return;  
+    }  
+      
+    // Actualizar params con la ruta resuelta  
+    params.file_path = resolvedPath;  
+    if (params.path) params.path = resolvedPath;  
   }
 
   // Pasamos a RUNNING
